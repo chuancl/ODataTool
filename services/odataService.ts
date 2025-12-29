@@ -9,9 +9,9 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
 
   const edmx = xmlDoc.getElementsByTagName("edmx:Edmx")[0] || xmlDoc.getElementsByTagName("Edmx")[0];
   if (!edmx) {
-      // 尝试处理含命名空间的标签，如 <edmx:Edmx> 在某些浏览器下可能需要带命名空间查找，或者不带
-      // 这里简化处理，如果找不到 Edmx，可能不是 Metadata
-      throw new Error("无效的 OData Metadata: 未找到 <edmx:Edmx> 根节点");
+      // 某些情况下 getElementsByTagName 无法处理带命名空间的标签，尝试 querySelector
+      const edmxQuery = xmlDoc.querySelector("Edmx");
+      if(!edmxQuery) throw new Error("无效的 OData Metadata: 未找到 <edmx:Edmx> 根节点");
   }
   const version = edmx?.getAttribute("Version") || "Unknown";
 
@@ -96,37 +96,49 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
 };
 
 /**
- * 判断内容是否看起来像 OData
+ * 判断当前页面/内容是否是 OData 服务
  */
-export const isODataContent = (content: string, url: string): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
-    // 1. Check URL patterns
-    const isMetadataUrl = url.includes('$metadata');
+export const isODataPage = (doc: Document, url: string): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
+    const contentType = doc.contentType;
     
-    // 2. Check Content Patterns
-    
-    // Metadata (XML)
-    if (content.includes('<edmx:Edmx') || (content.includes('<Schema') && content.includes('http://schemas.microsoft.com/ado'))) {
-        return { isOData: true, type: 'metadata' };
+    // 1. 如果是 XML 文档 (application/xml, text/xml)
+    if (contentType.includes('xml')) {
+        const rootNodeName = doc.documentElement.nodeName;
+        
+        // Metadata ($metadata)
+        if (rootNodeName.includes('Edmx')) {
+            return { isOData: true, type: 'metadata' };
+        }
+        
+        // Service Document (AtomPub, e.g. Northwind.svc/)
+        // root node usually <service> with xmlns="http://www.w3.org/2007/app"
+        if (rootNodeName === 'service' || rootNodeName.endsWith(':service')) {
+            return { isOData: true, type: 'serviceDoc' };
+        }
+
+        // Atom Feed (OData v2/v3 data)
+        if (rootNodeName === 'feed' || rootNodeName.endsWith(':feed')) {
+             // 检查是否有 m:properties 等 OData 特征
+             if (doc.documentElement.innerHTML.includes('schemas.microsoft.com/ado')) {
+                 return { isOData: true, type: 'data' };
+             }
+        }
     }
 
-    // Service Document (XML AtomPub) - e.g. Northwind.svc/
-    if (content.includes('<service') && content.includes('http://www.w3.org/2007/app') && content.includes('<workspace>')) {
-        return { isOData: true, type: 'serviceDoc' };
-    }
-
-    // JSON Responses
-    if (content.includes('@odata.context')) {
-        // V4 JSON
-        return { isOData: true, type: content.includes('$metadata') ? 'metadata' : 'data' };
+    // 2. 如果是 JSON 文档 (或纯文本显示的 JSON)
+    // Chrome 有时会把 application/json 显示为纯文本
+    const bodyText = doc.body ? doc.body.innerText : '';
+    if (bodyText.startsWith('{') && bodyText.includes('@odata.context')) {
+        return { isOData: true, type: bodyText.includes('$metadata') ? 'metadata' : 'data' };
     }
     
-    // V2/V3 JSON often has "d": { ... } or __metadata
-    if (content.includes('__metadata') && content.includes('"uri":')) {
+    // V2 JSON
+    if (bodyText.includes('__metadata') && bodyText.includes('"uri":')) {
         return { isOData: true, type: 'data' };
     }
 
-    // Fallback URL check
-    if (isMetadataUrl) return { isOData: true, type: 'metadata' };
+    // 3. URL 辅助判断
+    if (url.includes('$metadata')) return { isOData: true, type: 'metadata' };
 
     return { isOData: false, type: 'unknown' };
 };
@@ -137,21 +149,13 @@ export const isODataContent = (content: string, url: string): { isOData: boolean
 export const inferMetadataUrl = (url: string): string => {
     if (url.includes('$metadata')) return url;
     
-    // 如果以 / 结尾，去掉
-    let cleanUrl = url.replace(/\/$/, ''); // Remove trailing slash
+    let cleanUrl = url.split('?')[0].replace(/\/$/, '');
     
-    // 简单的启发式：如果是 Service Root，直接加 $metadata
-    // 如果是 EntitySet (e.g. /Products)，通常 Metadata 在 Root/$metadata
-    // 这里我们简单粗暴处理：尝试在末尾加 $metadata，或者如果包含 .svc，则在 .svc 后加 $metadata
-    
-    if (cleanUrl.includes('.svc')) {
-        const parts = cleanUrl.split('.svc');
-        return `${parts[0]}.svc/$metadata`;
+    // 针对 .svc 服务的处理 (WCF Data Services)
+    if (cleanUrl.endsWith('.svc')) {
+        return `${cleanUrl}/$metadata`;
     }
     
-    // 如果是纯 Rest 风格 (e.g. /api/odata/People)，我们假设同级或父级
-    // 对于通用情况，直接 append 往往是错的 (e.g. /People -> /People/$metadata is wrong, should be /$metadata)
-    // 此时最安全的做法是让用户确认，或者我们在 Viewer 里尝试 fetch
-    // 这里为了 Demo，先直接 append，Viewer 里失败了用户可以改
+    // 默认尝试追加 $metadata
     return `${cleanUrl}/$metadata`;
 };

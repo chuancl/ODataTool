@@ -4,6 +4,7 @@ import { browser } from 'wxt/browser';
 import { Box, Layers, ArrowRight, RefreshCw, Code, Database, AlertCircle } from 'lucide-react';
 import { ViewerState } from '../../types';
 import { parseODataMetadata, inferMetadataUrl } from '../../services/odataService';
+import '../../assets/main.css'; // 引入 Tailwind CSS
 
 const ODataViewerApp: React.FC = () => {
   const [state, setState] = useState<ViewerState>({
@@ -20,7 +21,11 @@ const ODataViewerApp: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const sourceType = params.get('sourceType') as any || 'url';
     let url = params.get('url') || '';
-    const detectedType = params.get('detectedType');
+    
+    // 如果 URL 被 decode 导致问题，确保它是完整的
+    if (url && !url.startsWith('http')) {
+        // 有时候参数传递会被截断，这里做个简单防护，但这通常不会发生
+    }
 
     setState(prev => ({ ...prev, sourceType, url, isLoading: true }));
 
@@ -32,49 +37,41 @@ const ODataViewerApp: React.FC = () => {
         content = data.temp_odata_content;
         parseAndSet(content);
       } else if (sourceType === 'url' && url) {
-        // 如果检测到是 ServiceDoc 或 Data，或者是普通的 URL，我们优先尝试获取 Metadata
-        // 如果已经是 $metadata 结尾，直接 fetch
         let fetchUrl = url;
         
-        if (!url.includes('$metadata')) {
-            // 尝试推断 Metadata URL
-            const metadataUrl = inferMetadataUrl(url);
-            console.log(`Input URL: ${url}, Inferring Metadata: ${metadataUrl}`);
-            
-            // 我们先尝试 Fetch 推断出的 Metadata
-            try {
-                const res = await fetch(metadataUrl);
-                if (res.ok) {
-                    const text = await res.text();
-                    // 验证一下是不是真的 Metadata
-                    if (text.includes('<edmx:Edmx') || text.includes('<Schema')) {
-                        fetchUrl = metadataUrl;
-                        content = text;
-                        // 更新 UI 显示的 URL 为实际 Metadata URL
-                        setState(prev => ({ ...prev, url: metadataUrl }));
-                    } else {
-                        // 推断失败，回退到原始 URL (可能是用户直接输入的 URL)
-                        console.warn("Inferred URL did not return Metadata, falling back to original.");
-                    }
-                }
-            } catch (e) {
-                console.warn("Failed to fetch inferred metadata, using original.");
-            }
+        // 智能逻辑：如果当前 URL 不是 metadata，我们尝试推断并获取 metadata
+        if (!url.toLowerCase().includes('$metadata')) {
+             const metadataUrl = inferMetadataUrl(url);
+             console.log(`[Viewer] Inferring Metadata URL: ${metadataUrl}`);
+             
+             try {
+                 const res = await fetch(metadataUrl);
+                 if (res.ok) {
+                     const text = await res.text();
+                     if (text.includes('Edmx') || text.includes('Schema')) {
+                         fetchUrl = metadataUrl;
+                         content = text;
+                         setState(prev => ({ ...prev, url: metadataUrl })); // 更新 UI 显示实际解析的 URL
+                     }
+                 }
+             } catch (e) {
+                 console.warn("Failed to fetch inferred metadata, falling back to original.");
+             }
         }
 
         if (!content) {
             const res = await fetch(fetchUrl);
-            if (!res.ok) throw new Error(`HTTP Error: ${res.status} accessing ${fetchUrl}`);
+            if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
             content = await res.text();
         }
 
         parseAndSet(content);
       } else {
-        setState(prev => ({ ...prev, isLoading: false, error: "未获取到内容" }));
+        setState(prev => ({ ...prev, isLoading: false, error: "无效的来源或 URL" }));
       }
     } catch (err: any) {
       console.error(err);
-      setState(prev => ({ ...prev, isLoading: false, error: err.message || "解析失败" }));
+      setState(prev => ({ ...prev, isLoading: false, error: `请求失败: ${err.message}\n请检查该 OData 服务是否允许跨域 (CORS)，或尝试手动上传 Metadata 文件。` }));
     }
   };
 
@@ -83,17 +80,16 @@ const ODataViewerApp: React.FC = () => {
         const schema = parseODataMetadata(content);
         setState(prev => ({ ...prev, isLoading: false, schema, content, error: undefined }));
       } catch (e: any) {
-          // 如果解析 XML 失败，可能是 fetch 到了 JSON 数据或者 Service Doc XML，但不是 Metadata
-          setState(prev => ({ ...prev, isLoading: false, error: `解析 Metadata 失败: ${e.message}. 请确保您提供的是 $metadata URL。` }));
+          setState(prev => ({ ...prev, isLoading: false, error: `解析失败: ${e.message}。请确保这是有效的 OData Metadata XML。` }));
       }
   };
 
   const currentEntity = state.schema?.entities.find(e => e.name === selectedEntity);
 
   return (
-    <div className="flex flex-col h-screen text-slate-800 bg-slate-50">
+    <div className="flex flex-col h-screen text-slate-800 bg-slate-50 font-sans">
       {/* 顶部栏 */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10">
+      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 h-16 shrink-0">
         <div className="flex items-center gap-3">
             <div className="bg-indigo-600 p-2 rounded-lg text-white shadow-sm">
                 <Database className="w-5 h-5" />
@@ -126,24 +122,20 @@ const ODataViewerApp: React.FC = () => {
                     <div className="w-12 h-12 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin absolute top-0 left-0"></div>
                 </div>
                 <p className="mt-4 font-medium">正在分析 OData 服务...</p>
-                <p className="text-xs text-slate-400 mt-2">正在尝试获取元数据 schema</p>
             </div>
         )}
 
         {state.error && (
-             <div className="w-full h-full flex flex-col items-center justify-center p-8">
+             <div className="w-full h-full flex flex-col items-center justify-center p-8 overflow-y-auto">
                 <div className="bg-white p-8 rounded-2xl shadow-xl border border-red-100 max-w-lg w-full text-center">
                     <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
                         <AlertCircle className="w-8 h-8" />
                     </div>
-                    <h2 className="font-bold text-xl text-slate-800 mb-2">无法展示可视化</h2>
-                    <p className="text-slate-600 mb-6">{state.error}</p>
+                    <h2 className="font-bold text-xl text-slate-800 mb-2">无法展示</h2>
+                    <p className="text-slate-600 mb-6 text-sm whitespace-pre-line">{state.error}</p>
                     <div className="flex gap-3 justify-center">
                         <button onClick={() => window.history.back()} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition">
-                            返回原页面
-                        </button>
-                         <button onClick={() => window.location.reload()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition">
-                            重试
+                            返回
                         </button>
                     </div>
                 </div>
