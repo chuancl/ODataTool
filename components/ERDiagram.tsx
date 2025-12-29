@@ -140,9 +140,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     }
                 }
 
-                if (actualTarget && actualTarget !== entity.name) { // 避免自引用过于混乱，或者可以保留
+                if (actualTarget && actualTarget !== entity.name) {
                     const edgeId = `${entity.name}-${nav.name}-${actualTarget}`;
-                    // 检查是否已存在反向边，如果存在，可能重叠，这里暂不处理复杂情况
                     edges.push({
                         id: edgeId,
                         source: entity.name,
@@ -161,14 +160,13 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         return getLayoutedElements(nodes, edges);
     }, [schema]);
 
-    const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+    const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes || []);
+    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges || []);
 
     useEffect(() => {
-        setNodes(initialNodes);
-        setEdges(initialEdges);
+        if (initialNodes) setNodes(initialNodes);
+        if (initialEdges) setEdges(initialEdges);
         
-        // 双重延时确保渲染
         const t1 = setTimeout(() => {
             fitView({ padding: 0.2 });
         }, 50);
@@ -180,7 +178,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         return () => { clearTimeout(t1); clearTimeout(t2); };
     }, [initialNodes, initialEdges, fitView, setNodes, setEdges]);
 
-    if (!schema || schema.entities.length === 0) {
+    // 安全检查：确保 schema.entities 存在后再访问 length
+    if (!schema || !schema.entities || schema.entities.length === 0) {
         return (
             <div className="w-full h-full flex items-center justify-center text-slate-400">
                 <p>No entities found in schema.</p>
@@ -188,7 +187,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         );
     }
 
-    if (nodes.length === 0) {
+    // 安全检查：确保 nodes 存在
+    if (!nodes || nodes.length === 0) {
          return (
             <div className="w-full h-full flex items-center justify-center text-slate-400">
                 <p>Preparing diagram...</p>
