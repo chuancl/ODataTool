@@ -53,7 +53,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
       });
     });
 
-    // 3. 生成连线 (Core Logic for Field-to-Field)
+    // 3. 生成连线 (纯粹的 Field-to-Field，不回退到 Header)
     schema.entities.forEach((entity) => {
       entity.navigationProperties.forEach((nav) => {
         let rawTargetType = nav.type;
@@ -68,42 +68,40 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
         }
 
         if (targetEntity) {
-          // *** 关键修改 ***
           // 起点：当前的 Navigation Property 行
           const sourceHandleId = getHandleId('source', nav.name);
           
-          // 终点：优先指向目标实体的第一个主键 (PK)
-          // 如果目标实体没有主键 (不太可能)，则回退到 Header
-          let targetHandleId = 'target-header';
+          // 终点：严格指向目标实体的第一个主键 (PK)
+          // 只有当目标实体有主键时，才画这条线
           if (targetEntity.keys && targetEntity.keys.length > 0) {
-              targetHandleId = getHandleId('target', targetEntity.keys[0]);
-          }
+              const targetHandleId = getHandleId('target', targetEntity.keys[0]);
 
-          rawEdges.push({
-            id: `${entity.name}-${nav.name}-${targetEntity.name}`,
-            source: entity.name,
-            target: targetEntity.name,
-            sourceHandle: sourceHandleId, // 从属性出
-            targetHandle: targetHandleId, // 到主键入
-            type: 'smoothstep', 
-            animated: false,
-            style: { stroke: '#94a3b8', strokeWidth: 1.5 },
-            pathOptions: { 
-                borderRadius: 10,
-                offset: 20 
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 14,
-              height: 14,
-              color: '#94a3b8',
-            },
-            label: isCollection ? '1..N' : '1..1',
-            labelStyle: { fill: '#64748b', fontSize: 10, fontWeight: 500 },
-            labelBgPadding: [2, 2],
-            labelBgBorderRadius: 4,
-            labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.9 },
-          } as any);
+              rawEdges.push({
+                id: `${entity.name}-${nav.name}-${targetEntity.name}`,
+                source: entity.name,
+                target: targetEntity.name,
+                sourceHandle: sourceHandleId, // 从属性出
+                targetHandle: targetHandleId, // 到主键入
+                type: 'smoothstep', 
+                animated: false,
+                style: { stroke: '#94a3b8', strokeWidth: 1.5 },
+                pathOptions: { 
+                    borderRadius: 10,
+                    offset: 20 
+                },
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  width: 14,
+                  height: 14,
+                  color: '#94a3b8',
+                },
+                label: isCollection ? '1..N' : '1..1',
+                labelStyle: { fill: '#64748b', fontSize: 10, fontWeight: 500 },
+                labelBgPadding: [2, 2],
+                labelBgBorderRadius: 4,
+                labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.9 },
+              } as any);
+          }
         }
       });
     });

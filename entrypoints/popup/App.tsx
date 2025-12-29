@@ -27,7 +27,7 @@ const App: React.FC = () => {
 
   const openViewer = async (params: Record<string, string>) => {
     const query = new URLSearchParams(params).toString();
-    const viewerUrl = browser.runtime.getURL(`/viewer.html?${query}`);
+    const viewerUrl = (browser.runtime as any).getURL(`/viewer.html?${query}`);
     await browser.tabs.create({ url: viewerUrl });
   };
 

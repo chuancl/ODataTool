@@ -10,7 +10,7 @@ export default defineBackground(() => {
       const tabId = sender.tab?.id;
       if (tabId) {
         // 构建插件内部 Viewer 页面的 URL
-        const viewerUrl = browser.runtime.getURL(
+        const viewerUrl = (browser.runtime as any).getURL(
           `/viewer.html?sourceType=url&url=${message.url}&detectedType=${message.detectedType || 'unknown'}`
         );
         

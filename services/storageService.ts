@@ -5,7 +5,7 @@ const SETTINGS_KEY = 'odata_explorer_settings';
 
 export const getSettings = async (): Promise<AppSettings> => {
   const result = await browser.storage.local.get(SETTINGS_KEY);
-  return result[SETTINGS_KEY] || DEFAULT_SETTINGS;
+  return (result[SETTINGS_KEY] as AppSettings) || DEFAULT_SETTINGS;
 };
 
 export const saveSettings = async (settings: AppSettings): Promise<void> => {

@@ -22,20 +22,14 @@ const EntityNode = memo(({ data }: EntityNodeProps) => {
   const visibleProps = otherProperties.slice(0, MAX_VISIBLE_PROPS);
   const hiddenCount = otherProperties.length - MAX_VISIBLE_PROPS;
 
-  // Handle 样式：虽然透明，但要有尺寸以便鼠标能感知，位置要精确
-  const handleStyle = { width: 4, height: 4, background: '#94a3b8', border: 'none', opacity: 0.5 };
+  // Handle 样式：位置向外微调 (left: -4, right: -4)，使其看起来像是在边框上，而不是在表格内
+  const handleStyle = { width: 4, height: 4, background: '#94a3b8', border: 'none', opacity: 0.8 };
 
   return (
     <div className="w-[240px] bg-white border border-slate-300 shadow-md rounded-md overflow-hidden text-[11px] font-sans hover:shadow-xl transition-shadow duration-200 hover:border-indigo-400">
       
-      {/* Header: 备用 Target (如果连线没法指到具体 Key) */}
+      {/* Header: 不再包含任何 Handle */}
       <div className="bg-slate-100 border-b border-slate-200 px-3 py-2 flex items-center justify-between relative">
-        <Handle 
-            type="target" 
-            position={Position.Left} 
-            id="target-header"
-            style={{...handleStyle, left: -2, top: '50%'}}
-        />
         <span className="font-bold text-slate-800 truncate text-xs" title={entity.name}>
           {entity.name}
         </span>
@@ -55,7 +49,7 @@ const EntityNode = memo(({ data }: EntityNodeProps) => {
                 type="target" 
                 position={Position.Left} 
                 id={getHandleId('target', prop.name)}
-                style={{...handleStyle, left: -2, top: '50%', background: '#d97706'}} // amber-600
+                style={{...handleStyle, left: -4, top: '50%', background: '#d97706'}} // amber-600
              />
 
              <div className="flex items-center gap-2 overflow-hidden mr-1">
@@ -105,7 +99,7 @@ const EntityNode = memo(({ data }: EntityNodeProps) => {
                     type="source"
                     position={Position.Right}
                     id={handleId}
-                    style={{...handleStyle, right: -2, top: '50%', background: '#4f46e5'}} // indigo-600
+                    style={{...handleStyle, right: -4, top: '50%', background: '#4f46e5'}} // indigo-600
                   />
                 </div>
               );

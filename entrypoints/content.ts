@@ -7,7 +7,7 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   main() {
-    // 防止死循环
+    // 防止死循环 
     if (window.location.protocol === 'chrome-extension:') return;
     if ((window as any).__ODATA_CHECKED__) return;
     (window as any).__ODATA_CHECKED__ = true;

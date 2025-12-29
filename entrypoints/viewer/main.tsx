@@ -35,7 +35,7 @@ const ODataViewerApp: React.FC = () => {
       
       if (sourceType === 'storage') {
         const data = await browser.storage.local.get('temp_odata_content');
-        content = data.temp_odata_content;
+        content = data.temp_odata_content as string;
         parseAndSet(content);
       } else if (sourceType === 'url' && url) {
         let fetchUrl = url;
