@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, FileUp, ArrowRight, Activity, Search } from 'lucide-react';
+import { Database, FileUp, Activity, Search } from 'lucide-react';
 import { browser } from 'wxt/browser';
 
 const App: React.FC = () => {
@@ -7,6 +7,7 @@ const App: React.FC = () => {
   
   const openViewer = async (params: Record<string, string>) => {
     const query = new URLSearchParams(params).toString();
+    // 注意：这里的路径是相对于构建后的根目录，WXT 会把 entrypoints/viewer/index.html 映射到 /viewer.html
     const viewerUrl = browser.runtime.getURL(`/viewer.html?${query}`);
     await browser.tabs.create({ url: viewerUrl });
   };
@@ -23,7 +24,6 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
-      // 将内容存入 storage，因为 URL 参数传大文本不合适
       await browser.storage.local.set({ 'temp_odata_content': content });
       openViewer({ sourceType: 'storage' });
     };
@@ -50,7 +50,7 @@ const App: React.FC = () => {
               type="text"
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}
-              placeholder="输入 URL (例如 .../$metadata)"
+              placeholder="输入 URL"
               className="flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
             />
             <button
@@ -61,7 +61,7 @@ const App: React.FC = () => {
             </button>
           </div>
           <p className="text-xs text-slate-400 mt-2">
-            提示: 输入 $metadata 地址可获得最佳可视化效果。
+             例如: http://services.odata.org/Northwind/Northwind.svc/
           </p>
         </div>
 
@@ -83,19 +83,17 @@ const App: React.FC = () => {
           </label>
         </div>
 
-        {/* 状态说明 */}
-        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex gap-3">
-          <Activity className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-blue-800">
-            <p className="font-semibold mb-1">自动检测已启用</p>
-            <p>当您在浏览器中访问 OData XML 或 JSON 数据时，插件会自动提示或接管页面进行展示。</p>
-          </div>
+        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex gap-2 items-start">
+          <Activity className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-blue-800 leading-relaxed">
+            插件会自动接管 OData 服务链接。如果页面未自动跳转，请手动点击解析。
+          </p>
         </div>
 
       </main>
 
       <footer className="p-3 text-center text-xs text-slate-400">
-        OData Visualizer v1.0
+        OData Explorer v1.1
       </footer>
     </div>
   );
