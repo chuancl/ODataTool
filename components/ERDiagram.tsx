@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -12,96 +12,103 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel
 } from 'reactflow';
-import * as dagre from 'dagre';
-import { ODataSchema } from '../types';
+// 引入 ELK 的 bundled 版本以避免 Worker 加载问题
+import ELK from 'elkjs/lib/elk.bundled.js';
+import { ODataSchema, ODataEntity } from '../types';
 import EntityNode from './EntityNode';
 
 const nodeTypes = {
   entity: EntityNode,
 };
 
+// 初始化 ELK 实例
+const elk = new ELK();
+
 interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-const getDagreGraph = () => {
-    try {
-        // @ts-ignore
-        const dagreLib = dagre.default || dagre;
-        if (dagreLib && dagreLib.graphlib) {
-            return new dagreLib.graphlib.Graph();
-        }
-        // @ts-ignore
-        if (window.dagre && window.dagre.graphlib) {
-            // @ts-ignore
-            return new window.dagre.graphlib.Graph();
-        }
-    } catch(e) {
-        console.error("Dagre load failed", e);
-    }
-    return null;
+/**
+ * 估算实体节点的高度，用于布局引擎计算
+ * 需要与 EntityNode 组件的渲染逻辑保持一致
+ */
+const estimateNodeHeight = (entity: ODataEntity) => {
+    // 标题栏 + padding
+    const headerHeight = 50; 
+    
+    // 主键区域 (每行约 30px)
+    const pkHeight = entity.keys.length * 30;
+    
+    // 普通属性区域 (每行约 28px)，最大高度限制为 160px (css中设置)
+    const otherProps = entity.properties.filter(p => !entity.keys.includes(p.name));
+    const propsHeight = Math.min(otherProps.length * 28, 160);
+    
+    // 导航属性区域 (每行约 28px) + 顶部border
+    const navHeight = entity.navigationProperties.length > 0 
+        ? (entity.navigationProperties.length * 28) + 10 
+        : 0;
+
+    // 底部 padding
+    return headerHeight + pkHeight + propsHeight + navHeight + 20;
 };
 
-const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
-  const dagreGraph = getDagreGraph();
-  if (!dagreGraph) {
-      console.warn("Layout engine not found, falling back to grid.");
-      return null;
-  }
-
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
-  
-  // LR: Left to Right 布局
-  // 直角连线 (Step) 需要更大的间距来避免重叠
-  // ranksep: 层与层之间的水平距离 -> 设大一点，给连线转折留空间
-  // nodesep: 同层节点之间的垂直距离 -> 设大一点，防止线穿过节点
-  dagreGraph.setGraph({ 
-      rankdir: 'LR', 
-      nodesep: 150, 
-      ranksep: 350,
-      marginx: 50,
-      marginy: 50
-  });
-
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 320, height: 400 }); 
-  });
-
-  const nodeIds = new Set(nodes.map(n => n.id));
-  const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
-
-  validEdges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
-  });
-
-  try {
-      // @ts-ignore
-      const dagreLib = dagre.default || dagre;
-      dagreLib.layout(dagreGraph);
-  } catch (e) {
-      console.error("Layout calculation failed", e);
-      return null;
-  }
-
-  return nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    if (!nodeWithPosition) return node;
-    return {
-      ...node,
-      targetPosition: 'left',
-      sourcePosition: 'right',
-      position: {
-        x: nodeWithPosition.x - 160, 
-        y: nodeWithPosition.y - 200,
-      },
+const getElkLayout = async (nodes: Node[], edges: Edge[]) => {
+    const layoutOptions = {
+        'elk.algorithm': 'layered',
+        'elk.direction': 'RIGHT',
+        'elk.spacing.nodeNode': '60', // 垂直方向节点间距
+        'elk.layered.spacing.nodeNodeBetweenLayers': '220', // 水平方向层级间距，留足空间给连线
+        'elk.edgeRouting': 'ORTHOGONAL', // 正交路由（直角线）
+        'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', // 这种策略通常能产生更平衡的布局
+        'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+        'elk.padding': '[top=50,left=50,bottom=50,right=50]',
     };
-  });
+
+    const graph: any = {
+        id: 'root',
+        layoutOptions: layoutOptions,
+        children: nodes.map((node) => ({
+            id: node.id,
+            width: 280, // 节点固定宽度 (与 CSS 对应)
+            height: node.data.height || 300,
+        })),
+        edges: edges.map((edge) => ({
+            id: edge.id,
+            sources: [edge.source],
+            targets: [edge.target],
+        })),
+    };
+
+    try {
+        const layoutedGraph = await elk.layout(graph);
+        
+        const layoutedNodes = nodes.map((node) => {
+            // @ts-ignore
+            const nodeData = layoutedGraph.children?.find((n) => n.id === node.id);
+            if (!nodeData) return node;
+
+            return {
+                ...node,
+                position: {
+                    x: nodeData.x || 0,
+                    y: nodeData.y || 0,
+                },
+                // ELK 可能会微调宽高，但我们主要用它的坐标
+            };
+        });
+        
+        return layoutedNodes;
+    } catch (e) {
+        console.error("ELK Layout failed:", e);
+        return nodes; // 失败时返回原节点，避免崩溃
+    }
 };
+
 
 const getGridLayout = (nodes: Node[]) => {
     const COLUMNS = 4;
-    const X_SPACING = 450;
-    const Y_SPACING = 550;
+    const X_SPACING = 400;
+    const Y_SPACING = 500;
     
     return nodes.map((node, index) => ({
         ...node,
@@ -114,9 +121,26 @@ const getGridLayout = (nodes: Node[]) => {
 
 const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     const { fitView } = useReactFlow();
-    
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+    // 核心布局逻辑
+    const computeLayout = useCallback(async (currentNodes: Node[], currentEdges: Edge[], useElk = true) => {
+        if (useElk) {
+            const layouted = await getElkLayout(currentNodes, currentEdges);
+            setNodes(layouted);
+        } else {
+            const gridLayout = getGridLayout(currentNodes);
+            setNodes(gridLayout);
+        }
+        
+        // 布局完成后适应视图
+        setTimeout(() => {
+            window.requestAnimationFrame(() => {
+                fitView({ padding: 0.1, duration: 800 });
+            });
+        }, 50);
+    }, [fitView, setNodes]);
 
     useEffect(() => {
         if (!schema || !schema.entities || schema.entities.length === 0) {
@@ -128,6 +152,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         const rawNodes: Node[] = [];
         const rawEdges: Edge[] = [];
         const entityMap = new Map<string, string>(); 
+        
         schema.entities.forEach(e => {
             entityMap.set(e.name, e.name);
             if (schema.namespace) {
@@ -135,16 +160,19 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             }
         });
 
+        // 1. 构建节点
         schema.entities.forEach((entity) => {
+            const estimatedH = estimateNodeHeight(entity);
             rawNodes.push({
                 id: entity.name,
                 type: 'entity',
-                data: { entity },
+                data: { entity, height: estimatedH }, // 传入估算高度供 ELK 使用
                 position: { x: 0, y: 0 }, 
                 draggable: true,
             });
         });
 
+        // 2. 构建连线
         schema.entities.forEach((entity) => {
             entity.navigationProperties.forEach((nav) => {
                 let rawTargetType = nav.type;
@@ -162,11 +190,9 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 }
 
                 if (targetId && entityMap.has(targetId)) {
-                    const edgeId = `${entity.name}-${nav.name}-${targetId}`;
+                    // 避免自引用导致的布局混乱（可选，但通常 ER 图可以有自引用，ELK 处理得很好）
                     
-                    // --- 核心样式逻辑 ---
-                    // Collection (1:N): 蓝色 (#3b82f6), 粗线条
-                    // Single (1:1): 绿色 (#10b981), 细线条, 虚线可选(这里暂用实线区分粗细)
+                    const edgeId = `${entity.name}-${nav.name}-${targetId}`;
                     const edgeColor = isCollection ? '#3b82f6' : '#10b981';
                     const edgeWidth = isCollection ? 2 : 1.5;
                     
@@ -176,46 +202,27 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                         target: targetId,
                         sourceHandle: nav.name, 
                         targetHandle: 'target-input', 
-                        
-                        // 关键修改：使用 'step' 直角连线
-                        type: 'step', 
-                        
+                        type: 'step', // 坚持使用 step 直角线
                         animated: false,
-                        zIndex: isCollection ? 5 : 1, // 重要的线在上面
+                        zIndex: isCollection ? 10 : 1, 
                         label: isCollection ? '1..N' : '1..1',
-                        
-                        // 标签样式跟随线条颜色
                         labelStyle: { fill: edgeColor, fontWeight: 700, fontSize: 10 }, 
                         labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95, stroke: edgeColor, strokeWidth: 0.5, rx: 2, ry: 2 },
-                        
                         style: { 
                             stroke: edgeColor, 
                             strokeWidth: edgeWidth,
                         },
-                        
-                        // 箭头颜色一致
                         markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
                     });
                 }
             });
         });
 
-        let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
-        if (!layoutedNodes) {
-            layoutedNodes = getGridLayout(rawNodes);
-        }
-
-        setNodes(layoutedNodes);
         setEdges(rawEdges);
+        // 初始计算布局
+        computeLayout(rawNodes, rawEdges, true);
 
-        setTimeout(() => {
-            window.requestAnimationFrame(() => {
-                fitView({ padding: 0.2, duration: 800 });
-            });
-        }, 100);
-
-    }, [schema, fitView, setNodes, setEdges]);
-
+    }, [schema, computeLayout, setEdges]); // 注意依赖项
 
     if (!schema || !schema.entities || schema.entities.length === 0) {
         return (
@@ -232,11 +239,9 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            // 默认连接线也设为直角
             connectionLineType={ConnectionLineType.Step}
-            fitView
-            minZoom={0.1}
-            maxZoom={4}
+            minZoom={0.05}
+            maxZoom={2}
             defaultEdgeOptions={{ type: 'step' }} 
             proOptions={{ hideAttribution: true }}
             className="bg-slate-50"
@@ -245,26 +250,16 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             <Controls className="bg-white shadow-md border border-slate-200 rounded-lg overflow-hidden" />
             <Panel position="top-right" className="flex gap-2">
                 <button 
-                    onClick={() => {
-                        const gridNodes = getGridLayout(nodes);
-                        setNodes(gridNodes);
-                        setTimeout(() => fitView({ duration: 500 }), 50);
-                    }}
+                    onClick={() => computeLayout(nodes, edges, false)}
                     className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
                 >
                     Grid Layout
                 </button>
                 <button 
-                    onClick={() => {
-                         const smartNodes = getSmartLayout(nodes, edges);
-                         if(smartNodes) {
-                             setNodes(smartNodes);
-                             setTimeout(() => fitView({ duration: 800 }), 50);
-                         }
-                    }}
+                    onClick={() => computeLayout(nodes, edges, true)}
                     className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
                 >
-                    Smart Layout
+                    ELK Layout (Auto)
                 </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
