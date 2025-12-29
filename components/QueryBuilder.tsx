@@ -58,7 +58,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     setError(null);
   }, [selectedSet]);
 
-  // 构建 URL
+  // 构建标准编码的 URL (用于 Fetch 请求)
   const generatedUrl = useMemo(() => {
     if (!selectedSet) return '';
     const params = new URLSearchParams();
@@ -85,6 +85,19 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     return `${serviceRoot}/${selectedSet}${queryString ? '?' + queryString : ''}`;
   }, [serviceRoot, selectedSet, selectedProps, expandProps, filter, orderBy, orderByDir, top, skip, count, currentEntity]);
 
+  // 构建展示用的 URL (解码/未转义，方便用户阅读和复制)
+  const displayUrl = useMemo(() => {
+    if (!generatedUrl) return '';
+    try {
+      // URLSearchParams 会将空格编码为 '+'，我们需要先将其替换为 '%20'，
+      // 这样 decodeURIComponent 才能正确地将其还原为空格，而不是保留为 '+'。
+      // 同时 decodeURIComponent 会处理 %27 -> ' 等其他字符。
+      return decodeURIComponent(generatedUrl.replace(/\+/g, '%20'));
+    } catch (e) {
+      return generatedUrl;
+    }
+  }, [generatedUrl]);
+
   const toggleSelection = (set: Set<string>, val: string, updater: React.Dispatch<React.SetStateAction<Set<string>>>) => {
     const newSet = new Set(set);
     if (newSet.has(val)) newSet.delete(val);
@@ -93,6 +106,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
   };
 
   const executeQuery = async () => {
+    // 请求时使用 generatedUrl (编码版) 以保证安全和兼容
     if (!generatedUrl) return;
     setLoading(true);
     setError(null);
@@ -137,7 +151,8 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
   };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedUrl);
+    // 复制时使用 displayUrl (解码版)
+    navigator.clipboard.writeText(displayUrl);
   };
 
   if (!schema.entitySets.length) {
@@ -311,7 +326,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
            </div>
            <div className="bg-slate-800 rounded-md p-3 relative group">
               <code className="text-xs font-mono text-green-400 break-all whitespace-pre-wrap block">
-                {generatedUrl}
+                {displayUrl}
               </code>
            </div>
            <div className="mt-4 flex justify-end">
