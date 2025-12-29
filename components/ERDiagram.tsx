@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -24,31 +24,51 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
+// 增强的 Dagre 加载逻辑，兼容不同的构建环境
 const getDagreGraph = () => {
     try {
         // @ts-ignore
-        if (dagre.graphlib) return new dagre.graphlib.Graph();
+        const dagreLib = dagre.default || dagre;
+        if (dagreLib && dagreLib.graphlib) {
+            return new dagreLib.graphlib.Graph();
+        }
         // @ts-ignore
-        if (dagre.default && dagre.default.graphlib) return new dagre.default.graphlib.Graph();
-        // @ts-ignore
-        return new dagre.Graph(); 
+        if (window.dagre && window.dagre.graphlib) {
+            // @ts-ignore
+            return new window.dagre.graphlib.Graph();
+        }
     } catch(e) {
-        return null;
+        console.error("Dagre load failed", e);
     }
+    return null;
 };
 
 const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   const dagreGraph = getDagreGraph();
-  if (!dagreGraph) return null;
+  if (!dagreGraph) {
+      console.warn("Layout engine not found, falling back to grid.");
+      return null;
+  }
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
+  
   // LR: Left to Right 布局
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 100, ranksep: 250 });
-
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 280, height: 300 }); 
+  // nodesep: 同一层级节点垂直间距 (加大以防止垂直连线重叠)
+  // ranksep: 层级水平间距 (加大以给连线留出转弯空间)
+  dagreGraph.setGraph({ 
+      rankdir: 'LR', 
+      nodesep: 80, 
+      ranksep: 300,
+      marginx: 50,
+      marginy: 50
   });
 
+  nodes.forEach((node) => {
+    // 这里设置节点的估算大小，必须比实际大一点，避免过于拥挤
+    dagreGraph.setNode(node.id, { width: 320, height: 400 }); 
+  });
+
+  // 过滤掉不在节点列表中的无效连线
   const nodeIds = new Set(nodes.map(n => n.id));
   const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
@@ -58,15 +78,10 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
 
   try {
       // @ts-ignore
-      if (dagre.layout) {
-          // @ts-ignore
-          dagre.layout(dagreGraph);
-      } else if ((dagre as any).default?.layout) {
-          (dagre as any).default.layout(dagreGraph);
-      } else {
-          return null;
-      }
+      const dagreLib = dagre.default || dagre;
+      dagreLib.layout(dagreGraph);
   } catch (e) {
+      console.error("Layout calculation failed", e);
       return null;
   }
 
@@ -75,9 +90,11 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
     if (!nodeWithPosition) return node;
     return {
       ...node,
+      targetPosition: 'left',
+      sourcePosition: 'right',
       position: {
-        x: nodeWithPosition.x - 140,
-        y: nodeWithPosition.y - 150,
+        x: nodeWithPosition.x - 160, // 居中校正
+        y: nodeWithPosition.y - 200,
       },
     };
   });
@@ -85,8 +102,8 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
 
 const getGridLayout = (nodes: Node[]) => {
     const COLUMNS = 4;
-    const X_SPACING = 350;
-    const Y_SPACING = 450;
+    const X_SPACING = 400;
+    const Y_SPACING = 500;
     
     return nodes.map((node, index) => ({
         ...node,
@@ -96,7 +113,6 @@ const getGridLayout = (nodes: Node[]) => {
         },
     }));
 };
-
 
 const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     const { fitView } = useReactFlow();
@@ -114,6 +130,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         const rawNodes: Node[] = [];
         const rawEdges: Edge[] = [];
         
+        // 建立实体映射表，处理命名空间
         const entityMap = new Map<string, string>(); 
         schema.entities.forEach(e => {
             entityMap.set(e.name, e.name);
@@ -135,11 +152,13 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         schema.entities.forEach((entity) => {
             entity.navigationProperties.forEach((nav) => {
                 let rawTargetType = nav.type;
+                // 处理 Collection(Type)
                 const isCollection = rawTargetType.startsWith('Collection(');
                 if (isCollection) {
                     rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
                 }
 
+                // 尝试解析目标ID
                 let targetId = entityMap.get(rawTargetType);
                 if (!targetId) {
                     const shortName = rawTargetType.split('.').pop();
@@ -151,30 +170,35 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 if (targetId && entityMap.has(targetId)) {
                     const edgeId = `${entity.name}-${nav.name}-${targetId}`;
                     
-                    // 连线配置
                     rawEdges.push({
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
-                        
-                        // 核心修改：指定 Source Handle ID 为属性名，Target Handle ID 为 'target-input'
                         sourceHandle: nav.name, 
                         targetHandle: 'target-input', 
-
-                        type: 'smoothstep',  // 使用直角连线，风格更像 OData 图表
+                        type: 'smoothstep', // 使用平滑阶梯线
                         animated: false,
-                        zIndex: 10, 
+                        zIndex: 1, // 降低连线层级，防止遮挡节点
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#4f46e5', fontWeight: 700, fontSize: 11 }, // Indigo 600
-                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95, rx: 4, ry: 4 },
-                        style: { stroke: '#4f46e5', strokeWidth: 2 }, // Indigo 600
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#4f46e5' },
+                        labelStyle: { fill: '#64748b', fontWeight: 600, fontSize: 10 }, 
+                        labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.9, rx: 4, ry: 4 },
+                        style: { 
+                            stroke: '#94a3b8', // Slate 400 - 稍微深一点的灰色，既清晰又不刺眼
+                            strokeWidth: 2 
+                        },
+                        pathOptions: {
+                            borderRadius: 15, // 较小的圆角，看起来更硬朗整洁
+                            offset: 20 // 连线离开节点的一段距离
+                        },
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
                     });
                 }
             });
         });
 
+        // 优先尝试智能布局
         let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
+        // 如果失败，回退到网格布局
         if (!layoutedNodes) {
             layoutedNodes = getGridLayout(rawNodes);
         }
@@ -182,11 +206,12 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         setNodes(layoutedNodes);
         setEdges(rawEdges);
 
+        // 延迟执行 fitView 确保渲染完成
         setTimeout(() => {
             window.requestAnimationFrame(() => {
-                fitView({ padding: 0.1, duration: 800 });
+                fitView({ padding: 0.2, duration: 800 });
             });
-        }, 50);
+        }, 100);
 
     }, [schema, fitView, setNodes, setEdges]);
 
@@ -214,8 +239,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             proOptions={{ hideAttribution: true }}
             className="bg-slate-50"
         >
-            <Background color="#94a3b8" gap={24} size={1} />
-            <Controls />
+            <Background color="#cbd5e1" gap={24} size={1} />
+            <Controls className="bg-white shadow-md border border-slate-200 rounded-lg overflow-hidden" />
             <Panel position="top-right" className="flex gap-2">
                 <button 
                     onClick={() => {
@@ -225,7 +250,19 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     }}
                     className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
                 >
-                    Free Layout
+                    Grid Layout
+                </button>
+                <button 
+                    onClick={() => {
+                         const smartNodes = getSmartLayout(nodes, edges);
+                         if(smartNodes) {
+                             setNodes(smartNodes);
+                             setTimeout(() => fitView({ duration: 800 }), 50);
+                         }
+                    }}
+                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
+                >
+                    Smart Layout
                 </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
