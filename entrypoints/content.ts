@@ -16,17 +16,24 @@ export default defineContentScript({
     function checkAndTakeover() {
       const url = window.location.href;
       
-      // 使用当前 document 对象进行判断，比 innerText 更准确，特别是针对 XML
+      // 使用当前 document 对象进行判断
       const result = isODataPage(document, url);
 
       if (result.isOData) {
         console.log("[OData Visualizer] Detected:", result.type);
         
         const targetUrl = encodeURIComponent(url);
-        const viewerUrl = browser.runtime.getURL(`/viewer.html?sourceType=url&url=${targetUrl}&detectedType=${result.type}`);
         
-        // 使用 replace 避免历史记录堆叠，改善用户体验
-        window.location.replace(viewerUrl);
+        // 修改：不要直接 window.location.replace，而是发消息给 background
+        // 这样可以避免 "ERR_BLOCKED_BY_CLIENT" 错误
+        browser.runtime.sendMessage({
+          action: 'openViewer',
+          url: targetUrl,
+          detectedType: result.type
+        }).catch(err => {
+          // 忽略连接错误（例如插件更新导致旧 content script 失效）
+          console.warn("Failed to send message to background:", err);
+        });
       }
     }
   },
