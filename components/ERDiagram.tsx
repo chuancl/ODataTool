@@ -24,7 +24,6 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// 增强的 Dagre 加载逻辑，兼容不同的构建环境
 const getDagreGraph = () => {
     try {
         // @ts-ignore
@@ -53,22 +52,21 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   
   // LR: Left to Right 布局
-  // nodesep: 同一层级节点垂直间距 (加大以防止垂直连线重叠)
-  // ranksep: 层级水平间距 (加大以给连线留出转弯空间)
+  // 直角连线 (Step) 需要更大的间距来避免重叠
+  // ranksep: 层与层之间的水平距离 -> 设大一点，给连线转折留空间
+  // nodesep: 同层节点之间的垂直距离 -> 设大一点，防止线穿过节点
   dagreGraph.setGraph({ 
       rankdir: 'LR', 
-      nodesep: 80, 
-      ranksep: 300,
+      nodesep: 150, 
+      ranksep: 350,
       marginx: 50,
       marginy: 50
   });
 
   nodes.forEach((node) => {
-    // 这里设置节点的估算大小，必须比实际大一点，避免过于拥挤
     dagreGraph.setNode(node.id, { width: 320, height: 400 }); 
   });
 
-  // 过滤掉不在节点列表中的无效连线
   const nodeIds = new Set(nodes.map(n => n.id));
   const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
@@ -93,7 +91,7 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
       targetPosition: 'left',
       sourcePosition: 'right',
       position: {
-        x: nodeWithPosition.x - 160, // 居中校正
+        x: nodeWithPosition.x - 160, 
         y: nodeWithPosition.y - 200,
       },
     };
@@ -102,8 +100,8 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
 
 const getGridLayout = (nodes: Node[]) => {
     const COLUMNS = 4;
-    const X_SPACING = 400;
-    const Y_SPACING = 500;
+    const X_SPACING = 450;
+    const Y_SPACING = 550;
     
     return nodes.map((node, index) => ({
         ...node,
@@ -129,8 +127,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
         const rawNodes: Node[] = [];
         const rawEdges: Edge[] = [];
-        
-        // 建立实体映射表，处理命名空间
         const entityMap = new Map<string, string>(); 
         schema.entities.forEach(e => {
             entityMap.set(e.name, e.name);
@@ -152,13 +148,11 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         schema.entities.forEach((entity) => {
             entity.navigationProperties.forEach((nav) => {
                 let rawTargetType = nav.type;
-                // 处理 Collection(Type)
                 const isCollection = rawTargetType.startsWith('Collection(');
                 if (isCollection) {
                     rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
                 }
 
-                // 尝试解析目标ID
                 let targetId = entityMap.get(rawTargetType);
                 if (!targetId) {
                     const shortName = rawTargetType.split('.').pop();
@@ -170,35 +164,43 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 if (targetId && entityMap.has(targetId)) {
                     const edgeId = `${entity.name}-${nav.name}-${targetId}`;
                     
+                    // --- 核心样式逻辑 ---
+                    // Collection (1:N): 蓝色 (#3b82f6), 粗线条
+                    // Single (1:1): 绿色 (#10b981), 细线条, 虚线可选(这里暂用实线区分粗细)
+                    const edgeColor = isCollection ? '#3b82f6' : '#10b981';
+                    const edgeWidth = isCollection ? 2 : 1.5;
+                    
                     rawEdges.push({
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
                         sourceHandle: nav.name, 
                         targetHandle: 'target-input', 
-                        type: 'smoothstep', // 使用平滑阶梯线
+                        
+                        // 关键修改：使用 'step' 直角连线
+                        type: 'step', 
+                        
                         animated: false,
-                        zIndex: 1, // 降低连线层级，防止遮挡节点
+                        zIndex: isCollection ? 5 : 1, // 重要的线在上面
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#64748b', fontWeight: 600, fontSize: 10 }, 
-                        labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.9, rx: 4, ry: 4 },
+                        
+                        // 标签样式跟随线条颜色
+                        labelStyle: { fill: edgeColor, fontWeight: 700, fontSize: 10 }, 
+                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95, stroke: edgeColor, strokeWidth: 0.5, rx: 2, ry: 2 },
+                        
                         style: { 
-                            stroke: '#94a3b8', // Slate 400 - 稍微深一点的灰色，既清晰又不刺眼
-                            strokeWidth: 2 
+                            stroke: edgeColor, 
+                            strokeWidth: edgeWidth,
                         },
-                        pathOptions: {
-                            borderRadius: 15, // 较小的圆角，看起来更硬朗整洁
-                            offset: 20 // 连线离开节点的一段距离
-                        },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
+                        
+                        // 箭头颜色一致
+                        markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
                     });
                 }
             });
         });
 
-        // 优先尝试智能布局
         let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
-        // 如果失败，回退到网格布局
         if (!layoutedNodes) {
             layoutedNodes = getGridLayout(rawNodes);
         }
@@ -206,7 +208,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         setNodes(layoutedNodes);
         setEdges(rawEdges);
 
-        // 延迟执行 fitView 确保渲染完成
         setTimeout(() => {
             window.requestAnimationFrame(() => {
                 fitView({ padding: 0.2, duration: 800 });
@@ -231,11 +232,12 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            connectionLineType={ConnectionLineType.SmoothStep}
+            // 默认连接线也设为直角
+            connectionLineType={ConnectionLineType.Step}
             fitView
             minZoom={0.1}
             maxZoom={4}
-            defaultEdgeOptions={{ type: 'smoothstep' }}
+            defaultEdgeOptions={{ type: 'step' }} 
             proOptions={{ hideAttribution: true }}
             className="bg-slate-50"
         >
