@@ -1,11 +1,11 @@
 {
-  "name": "Context-Immersion: English Learning Extension",
-  "description": "A Chrome Extension that replaces Chinese words on webpages with English equivalents based on context using Gemini AI, facilitating immersive language learning.",
+  "name": "OData Explorer & Visualizer",
+  "description": "自动检测并可视化 OData 服务 ($metadata) 的 Chrome 插件。支持解析、图表展示及接管 OData 链接。",
   "permissions": [
     "activeTab",
     "storage",
     "scripting",
-    "contextMenus"
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"
