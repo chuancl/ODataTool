@@ -12,7 +12,7 @@ import {
   ConnectionLineType,
   useReactFlow,
 } from '@xyflow/react';
-import { ODataSchema } from '../types';
+import { ODataSchema, ODataEntity } from '../types';
 import EntityNode, { getHandleId } from './EntityNode';
 import { getLayoutedElements } from '../services/layoutService';
 
@@ -28,7 +28,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   
-  // 使用 ref 避免 useEffect 闭包陷阱，确保只计算一次
   const isLayoutCalculated = useRef(false);
 
   const processGraph = useCallback(async () => {
@@ -36,12 +35,12 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
 
     const rawNodes: Node[] = [];
     const rawEdges: Edge[] = [];
-    const entityMap = new Map<string, string>();
+    const entityMap = new Map<string, ODataEntity>();
 
-    // 1. 映射表
+    // 1. 建立 Entity 映射表 (Name -> EntityObj)
     schema.entities.forEach(e => {
-        entityMap.set(e.name, e.name);
-        if (schema.namespace) entityMap.set(`${schema.namespace}.${e.name}`, e.name);
+        entityMap.set(e.name, e);
+        if (schema.namespace) entityMap.set(`${schema.namespace}.${e.name}`, e);
     });
 
     // 2. 生成节点
@@ -49,43 +48,54 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
       rawNodes.push({
         id: entity.name,
         type: 'entity',
-        position: { x: 0, y: 0 }, // 初始位置设为 0，等待 ELK 计算
+        position: { x: 0, y: 0 },
         data: { entity },
       });
     });
 
-    // 3. 生成连线
+    // 3. 生成连线 (Core Logic for Field-to-Field)
     schema.entities.forEach((entity) => {
       entity.navigationProperties.forEach((nav) => {
         let rawTargetType = nav.type;
         const isCollection = rawTargetType.startsWith('Collection(');
         if (isCollection) rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
 
-        let targetId = entityMap.get(rawTargetType);
-        if (!targetId) {
+        // 查找目标实体对象
+        let targetEntity: ODataEntity | undefined = entityMap.get(rawTargetType);
+        if (!targetEntity) {
             const shortName = rawTargetType.split('.').pop();
-            if (shortName && entityMap.has(shortName)) targetId = entityMap.get(shortName);
+            if (shortName) targetEntity = entityMap.get(shortName);
         }
 
-        if (targetId && entityMap.has(targetId)) {
-          const sourceHandleId = getHandleId(nav.name);
+        if (targetEntity) {
+          // *** 关键修改 ***
+          // 起点：当前的 Navigation Property 行
+          const sourceHandleId = getHandleId('source', nav.name);
           
+          // 终点：优先指向目标实体的第一个主键 (PK)
+          // 如果目标实体没有主键 (不太可能)，则回退到 Header
+          let targetHandleId = 'target-header';
+          if (targetEntity.keys && targetEntity.keys.length > 0) {
+              targetHandleId = getHandleId('target', targetEntity.keys[0]);
+          }
+
           rawEdges.push({
-            id: `${entity.name}-${nav.name}-${targetId}`,
+            id: `${entity.name}-${nav.name}-${targetEntity.name}`,
             source: entity.name,
-            target: targetId,
-            sourceHandle: sourceHandleId,
+            target: targetEntity.name,
+            sourceHandle: sourceHandleId, // 从属性出
+            targetHandle: targetHandleId, // 到主键入
             type: 'smoothstep', 
             animated: false,
             style: { stroke: '#94a3b8', strokeWidth: 1.5 },
             pathOptions: { 
-                borderRadius: 15,
-                offset: 25 // 稍微加大一点 offset，让线出来更直一点
+                borderRadius: 10,
+                offset: 20 
             },
             markerEnd: {
               type: MarkerType.ArrowClosed,
-              width: 16,
-              height: 16,
+              width: 14,
+              height: 14,
               color: '#94a3b8',
             },
             label: isCollection ? '1..N' : '1..1',
@@ -98,17 +108,12 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
       });
     });
 
-    // 4. 调用 ELK 异步布局
     try {
         const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(rawNodes, rawEdges);
-        
         setNodes(layoutedNodes);
         setEdges(layoutedEdges);
-        
-        // 布局完成后标记
         isLayoutCalculated.current = true;
         
-        // 可选：适应视图，稍微延迟以确保渲染完成
         setTimeout(() => {
             const fitViewBtn = document.querySelector('.react-flow__controls-fitview');
             if(fitViewBtn) (fitViewBtn as HTMLElement).click();
@@ -116,7 +121,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
 
     } catch (e) {
         console.error("Layout calculation failed", e);
-        // 降级处理：即使布局失败也显示节点
         setNodes(rawNodes);
         setEdges(rawEdges);
     }
@@ -124,7 +128,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
   }, [schema, setNodes, setEdges]);
 
   useEffect(() => {
-    // 只有当 schema 变化且未计算过布局时才执行
     processGraph();
   }, [processGraph]);
 

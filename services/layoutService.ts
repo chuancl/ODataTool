@@ -1,60 +1,68 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { Node, Edge, Position } from '@xyflow/react';
 
-// 初始化 ELK 实例
 const elk = new ELK();
 
-// =============================================================================
-// 布局配置
-// =============================================================================
 const CONFIG = {
-  NODE_WIDTH: 240, // 必须与 EntityNode 实际宽度匹配
-  // ELK 布局选项参考: https://www.eclipse.org/elk/reference/options.html
+  NODE_WIDTH: 240, 
   layoutOptions: {
-    'elk.algorithm': 'layered', // 分层布局，最适合 ER 图
-    'elk.direction': 'RIGHT',   // 从左到右
+    'elk.algorithm': 'layered',
+    'elk.direction': 'RIGHT',
     
-    // 间距设置
-    'elk.spacing.nodeNode': '60', // 同层节点垂直间距 (防止太挤)
-    'elk.layered.spacing.nodeNodeBetweenLayers': '250', // 层与层之间的水平间距 (留出连线跑道)
+    // 垂直间距：适当增加，避免节点上下太挤
+    'elk.spacing.nodeNode': '60', 
     
-    // 交叉最小化策略
-    'elk.layered.crossingMinimization.strategy': 'INTERACTIVE', // 高质量减少交叉
+    // 水平间距：大大增加，因为现在是字段对字段的连线，中间需要足够的空间给折线
+    'elk.layered.spacing.nodeNodeBetweenLayers': '280', 
     
-    // 连线路由设置
-    'elk.edgeRouting': 'ORTHOGONAL', // 正交路由 (直角折线)，比 SPLINES 更整洁
+    // 交叉最小化：使用更高级的策略
+    'elk.layered.crossingMinimization.strategy': 'INTERACTIVE',
     
-    // 节点对齐
-    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', // 这种策略通常能让长线更直
+    // 路由：正交（直角），这对于表格连线最清晰
+    'elk.edgeRouting': 'ORTHOGONAL',
     
-    // 允许根据连线调整节点顺序
-    'elk.layered.considerModelOrder.strategy': 'NONE', 
+    // 节点放置策略：Brandes Koepf 通常能产生最直的长线
+    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    
+    // 尝试平衡节点位置，减少“狗腿”弯折
+    'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+    
+    // 端口约束：虽然我们没有显式定义 port 对象，但这个选项有时能帮助 ELK 理解我们希望侧面连接 
+    'elk.layered.spacing.edgeNodeBetweenLayers': '50',
   }
 };
 
-/**
- * 使用 ELK 计算布局 (异步)
- */
 export const getLayoutedElements = async (nodes: Node[], edges: Edge[]) => {
-  // 1. 构建 ELK 需要的 Graph 结构
   const elkGraph = {
     id: 'root',
     layoutOptions: CONFIG.layoutOptions,
     children: nodes.map((node) => {
-      // 动态计算高度
       const data = node.data as any;
       const propCount = data.entity.properties.length;
       const navCount = data.entity.navigationProperties.length;
       
-      // 估算高度: Header(40) + Props(26*N) + Navs(28*N) + Padding
+      // 重新估算高度，与 EntityNode 的新 CSS 匹配
+      // Header(34) + PKs(28*N) + Props(26*N) + Navs(28*N) + Padding
       const visibleProps = Math.min(propCount, 8);
-      const estimatedHeight = 40 + (visibleProps * 26) + (navCount > 0 ? 10 : 0) + (navCount * 28) + 20;
+      const keyCount = data.entity.keys.length;
+      
+      // 注意：EntityNode 现在的结构有所变化，PK 也是独立的行
+      // Header ~35px
+      // PK Rows ~30px each
+      // Prop Rows ~26px each
+      // Nav Rows ~30px each
+      
+      const contentHeight = 
+          35 + 
+          (keyCount * 30) + 
+          (visibleProps * 26) + 
+          (navCount > 0 ? 10 : 0) + (navCount * 30) + 
+          20;
 
       return {
         id: node.id,
         width: CONFIG.NODE_WIDTH,
-        height: estimatedHeight,
-        // 如果未来需要更精确的端口(Port)布局，可以在这里添加 ports 定义
+        height: contentHeight,
       };
     }),
     edges: edges.map((edge) => ({
@@ -65,14 +73,10 @@ export const getLayoutedElements = async (nodes: Node[], edges: Edge[]) => {
   };
 
   try {
-    // 2. 执行布局计算
     const layoutedGraph = await elk.layout(elkGraph);
 
-    // 3. 将结果映射回 React Flow Nodes
-    // ELK 返回的是左上角坐标，这与 React Flow 一致，不需要像 Dagre 那样转换中心点
     const layoutedNodes = nodes.map((node) => {
       const elkNode = layoutedGraph.children?.find((n) => n.id === node.id);
-
       if (!elkNode) return node;
 
       return {
@@ -81,7 +85,6 @@ export const getLayoutedElements = async (nodes: Node[], edges: Edge[]) => {
           x: elkNode.x || 0,
           y: elkNode.y || 0,
         },
-        // 强制指定 Handle 位置，配合 CSS 布局
         targetPosition: Position.Left,
         sourcePosition: Position.Right,
       };
@@ -90,7 +93,6 @@ export const getLayoutedElements = async (nodes: Node[], edges: Edge[]) => {
     return { nodes: layoutedNodes, edges };
   } catch (error) {
     console.error('ELK Layout Error:', error);
-    // 如果出错，返回原始节点，避免崩溃
     return { nodes, edges };
   }
 };
