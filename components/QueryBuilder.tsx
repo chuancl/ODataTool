@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, CornerDownRight, Rss } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, CornerDownRight } from 'lucide-react';
 import { ODataSchema, ODataEntity } from '../types';
 
 interface QueryBuilderProps {
@@ -131,7 +131,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
   const [count, setCount] = useState(false);
   
   // Format & View State
-  const [reqFormat, setReqFormat] = useState<'json' | 'xml' | 'atom'>('json'); // 请求格式
+  const [reqFormat, setReqFormat] = useState<'json' | 'xml'>('json'); // 请求格式
   const [viewMode, setViewMode] = useState<'code' | 'table'>('code'); // 视图模式
   
   // Result State
@@ -142,6 +142,8 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
 
   // Drill Down Stack for Table View
   const [drillStack, setDrillStack] = useState<Array<{ title: string, data: any }>>([]);
+
+  const isMounted = useRef(false);
 
   // 初始化：默认选中第一个 EntitySet
   useEffect(() => {
@@ -234,9 +236,8 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
       // 动态设置 Header
       const headers: any = {};
       if (reqFormat === 'xml') {
-          headers['Accept'] = 'application/xml, text/xml';
-      } else if (reqFormat === 'atom') {
-          headers['Accept'] = 'application/atom+xml';
+          // 尽量包含所有可能的 XML Content-Types 以避免 406/415
+          headers['Accept'] = 'application/atom+xml, application/xml, text/xml';
       } else {
           headers['Accept'] = 'application/json, application/json;odata.metadata=minimal';
       }
@@ -252,26 +253,19 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
           try {
               const json = JSON.parse(text);
               setResultData(json);
-              
-              if (viewMode === 'table') {
-                  // do nothing
-              }
           } catch (e) {
               // 解析失败，可能是服务器忽略了 Accept 返回了 XML
               setResultText(text);
               // 强制切回 XML 显示，避免空白
               if (text.trim().startsWith('<')) {
-                  // 粗略判断是 XML 还是 Atom，这里统一只做非 JSON 处理
-                  if (!reqFormat.includes('xml') && !reqFormat.includes('atom')) {
-                       setReqFormat('xml');
-                  }
+                  setReqFormat('xml');
                   throw new Error("服务器返回了 XML 数据，已自动切换到文本视图。");
               } else {
                   throw new Error("无法解析 JSON 响应: " + text.substring(0, 50));
               }
           }
       } else {
-          // XML 或 Atom 模式
+          // XML 模式
           setResultText(text);
       }
     } catch (e: any) {
@@ -281,13 +275,19 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     }
   };
 
+  // 监听格式切换，自动执行查询
+  useEffect(() => {
+      if (isMounted.current && generatedUrl) {
+          executeQuery();
+      }
+      isMounted.current = true;
+  }, [reqFormat]);
+
   const handleDrillDown = (key: string, data: any) => {
       setDrillStack(prev => [...prev, { title: key, data }]);
   };
 
   const handleDrillUp = (index: number) => {
-      // index is the target index to go back to. 
-      // -1 means root.
       if (index === -1) {
           setDrillStack([]);
       } else {
@@ -501,13 +501,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
                             onClick={() => { setReqFormat('xml'); }}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${reqFormat === 'xml' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                            <FileCode className="w-3.5 h-3.5" /> XML
-                        </button>
-                        <button 
-                            onClick={() => { setReqFormat('atom'); }}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${reqFormat === 'atom' ? 'bg-white text-green-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <Rss className="w-3.5 h-3.5" /> Atom
+                            <FileCode className="w-3.5 h-3.5" /> XML / Atom
                         </button>
                     </div>
                 </div>
@@ -614,7 +608,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
                         // XML or Atom View
                         <div className="h-full w-full overflow-auto">
                             <div className="px-3 py-2 border-b border-slate-100 bg-slate-50 text-xs font-bold text-slate-500 sticky top-0">
-                                <span>{reqFormat === 'atom' ? 'Atom' : 'XML'} Response</span>
+                                <span>XML / Atom Response</span>
                             </div>
                             <pre className="p-4 text-xs font-mono text-slate-700 w-full whitespace-pre-wrap break-all">
                                 {resultText}
