@@ -14,18 +14,17 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
   const otherProperties = entity.properties.filter(p => !entity.keys.includes(p.name));
 
   return (
-    <div className="relative min-w-[220px] max-w-[320px] font-sans text-xs shadow-xl rounded-lg bg-white border border-slate-200 group/node">
+    <div className="relative min-w-[220px] max-w-[320px] font-sans text-xs shadow-lg rounded-lg bg-white border border-slate-200 group/node transition-shadow hover:shadow-xl">
       
       {/* 
          全局输入点 (Target)
-         位于节点左侧顶部（Header附近），作为所有进入该节点连线的终点。
-         ID="target-input" 供 ERDiagram 引用。
+         位于节点左侧顶部
       */}
       <Handle 
         type="target" 
         position={Position.Left} 
         id="target-input"
-        className="!w-3 !h-3 !bg-indigo-600 !border-2 !border-white !rounded-full !-left-[6px] top-8 transition-transform hover:scale-125 z-50" 
+        className="!w-3 !h-3 !bg-indigo-600 !border-2 !border-white !rounded-full !-left-[6px] top-8 transition-transform hover:scale-125 z-50 shadow-sm" 
       />
 
       {/* 标题栏 */}
@@ -46,7 +45,7 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
       {/* 内容区域 */}
       <div className="divide-y divide-slate-100">
           
-          {/* 主键区域 */}
+          {/* 主键 */}
           {keyProperties.length > 0 && (
             <div className="bg-amber-50/60">
             {keyProperties.map((prop) => (
@@ -61,7 +60,7 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
             </div>
           )}
 
-          {/* 普通属性区域 */}
+          {/* 普通属性 */}
           <div className="bg-white max-h-[160px] overflow-y-auto custom-scrollbar">
             {otherProperties.map((prop) => (
             <div key={prop.name} className="flex items-center justify-between px-3 py-1.5 hover:bg-slate-50 group transition-colors">
@@ -71,10 +70,7 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
             ))}
           </div>
 
-          {/* 
-            导航属性区域 (Navigation Properties)
-            这里每一行都会放置一个 Source Handle，对应图中的红色连线起点。
-          */}
+          {/* 导航属性 */}
           {entity.navigationProperties.length > 0 && (
             <div className="bg-slate-50/80 border-t border-slate-200 pb-1">
             {entity.navigationProperties.map((nav) => {
@@ -82,15 +78,14 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
                 return (
                 <div key={nav.name} className="relative flex items-center justify-between px-3 py-1.5 hover:bg-indigo-50 transition-colors cursor-default group/item">
                     {/* 
-                        !!! 关键点 !!!
-                        每个属性行右侧都有一个专属的 Source Handle。
-                        ID = nav.name (属性名)
+                        连接点 (Source Handle)
+                        opacity-40 默认可见，hover 后变强
                     */}
                     <Handle
                         type="source"
                         position={Position.Right}
                         id={nav.name}
-                        className="!w-2 !h-2 !bg-indigo-500 !border-2 !border-white !rounded-full !-right-[5px] top-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-50"
+                        className="!w-2.5 !h-2.5 !bg-indigo-500 !border-2 !border-white !rounded-full !-right-[5px] top-1/2 opacity-40 group-hover/item:opacity-100 transition-opacity z-50 shadow-sm"
                     />
                     
                     <div className="flex items-center gap-2 truncate">

@@ -5,31 +5,29 @@ import { ODataSchema, ODataEntity, ODataProperty, ODataNavigationProperty } from
  */
 export const isValidODataMetadata = (content: string): boolean => {
     if (!content || typeof content !== 'string') return false;
-    // 检查是否包含关键的 Edmx 标签 (忽略大小写)
     const lower = content.toLowerCase();
     return (lower.includes('<edmx:edmx') || lower.includes('<edmx')) && 
-           (lower.includes('version="1.0"') || lower.includes('version="4.0"'));
+           (lower.includes('version="1.0"') || lower.includes('version="2.0"') || lower.includes('version="3.0"') || lower.includes('version="4.0"'));
 };
 
 /**
- * 辅助函数：根据 localName 获取 XML 元素列表 (忽略 namespace 前缀)
+ * 辅助函数：根据 localName 获取 XML 元素列表
  */
 const getElementsByLocalName = (parent: Document | Element, localName: string): Element[] => {
-    // 优先尝试 getElementsByTagName (性能好)
     let elements = Array.from(parent.getElementsByTagName(localName));
     if (elements.length > 0) return elements;
 
-    // 尝试带常见前缀的
     elements = Array.from(parent.getElementsByTagName("edmx:" + localName));
     if (elements.length > 0) return elements;
 
-    // 兜底：遍历所有子元素匹配 localName (性能较差，但兼容性最强)
-    // 注意：getElementsByTagName('*') 返回的是 HTMLCollection，需要转数组
+    // V2/V3 often use 'edm' prefix inside Schema
+    elements = Array.from(parent.getElementsByTagName("edm:" + localName));
+    if (elements.length > 0) return elements;
+
     const all = parent.getElementsByTagName("*");
     const result: Element[] = [];
     for (let i = 0; i < all.length; i++) {
         const el = all[i];
-        // 兼容处理：有些环境 localName 可能不准确，使用 nodeName 拆分
         const currentLocalName = el.localName || el.nodeName.split(':').pop();
         if (currentLocalName === localName) {
             result.push(el);
@@ -38,9 +36,6 @@ const getElementsByLocalName = (parent: Document | Element, localName: string): 
     return result;
 };
 
-/**
- * 解析 XML 格式的 OData $metadata 内容
- */
 export const parseODataMetadata = (xmlContent: string): ODataSchema => {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
@@ -57,98 +52,147 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
     throw new Error("无效的 OData Metadata: 未找到 <Schema> 定义");
   }
 
-  // 简化处理：通常取第一个主 Schema，或者包含 EntityType 的那个
-  let schemaNode = schemas[0];
-  // 尝试找到包含 EntityType 的 Schema (有些 metadata 有多个 schema，比如包含系统定义的)
-  for (const s of schemas) {
-      if (getElementsByLocalName(s, "EntityType").length > 0) {
-          schemaNode = s;
-          break;
-      }
-  }
+  // 1. 预处理 Associations (V2/V3)
+  // 映射关系: Association FullName -> Map<RoleName, TypeName>
+  const associationMap = new Map<string, Map<string, string>>();
 
-  const namespace = schemaNode.getAttribute("Namespace") || "";
+  schemas.forEach(schema => {
+      const namespace = schema.getAttribute("Namespace") || "";
+      const associations = getElementsByLocalName(schema, "Association");
+      
+      for (const assoc of associations) {
+          const name = assoc.getAttribute("Name");
+          if (!name) continue;
+
+          const fullName = namespace + "." + name;
+          const roleMap = new Map<string, string>();
+          
+          const ends = getElementsByLocalName(assoc, "End");
+          for (const end of ends) {
+              const role = end.getAttribute("Role");
+              const type = end.getAttribute("Type");
+              const multiplicity = end.getAttribute("Multiplicity");
+              
+              if (role && type) {
+                  let finalType = type;
+                  if (multiplicity === '*') {
+                      finalType = `Collection(${type})`;
+                  }
+                  roleMap.set(role, finalType);
+              }
+          }
+          associationMap.set(fullName, roleMap);
+          // 同时也存一个不带命名空间的 key，以防 Relationship 属性未写全名
+          if (!associationMap.has(name)) {
+              associationMap.set(name, roleMap);
+          }
+      }
+  });
 
   const entities: ODataEntity[] = [];
-  const entityTypes = getElementsByLocalName(schemaNode, "EntityType");
+  let mainNamespace = "";
 
-  for (const et of entityTypes) {
-    const name = et.getAttribute("Name") || "Unknown";
-    
-    // 解析主键
-    const keys: string[] = [];
-    const keyNodes = getElementsByLocalName(et, "Key");
-    if (keyNodes.length > 0) {
-      const propRefs = getElementsByLocalName(keyNodes[0], "PropertyRef");
-      for (const pr of propRefs) {
-        keys.push(pr.getAttribute("Name") || "");
+  // 2. 解析 Entities
+  schemas.forEach(schema => {
+      const namespace = schema.getAttribute("Namespace") || "";
+      if (!mainNamespace) mainNamespace = namespace;
+
+      const entityTypes = getElementsByLocalName(schema, "EntityType");
+
+      for (const et of entityTypes) {
+        const name = et.getAttribute("Name") || "Unknown";
+        
+        const keys: string[] = [];
+        const keyNodes = getElementsByLocalName(et, "Key");
+        if (keyNodes.length > 0) {
+          const propRefs = getElementsByLocalName(keyNodes[0], "PropertyRef");
+          for (const pr of propRefs) {
+            keys.push(pr.getAttribute("Name") || "");
+          }
+        }
+
+        const properties: ODataProperty[] = [];
+        const props = getElementsByLocalName(et, "Property");
+        for (const p of props) {
+          properties.push({
+            name: p.getAttribute("Name") || "",
+            type: p.getAttribute("Type") || "",
+            nullable: p.getAttribute("Nullable") !== "false"
+          });
+        }
+
+        const navProperties: ODataNavigationProperty[] = [];
+        const navProps = getElementsByLocalName(et, "NavigationProperty");
+        
+        for (const np of navProps) {
+          const npName = np.getAttribute("Name") || "";
+          let npType = np.getAttribute("Type");
+
+          // V2/V3 兼容逻辑：如果没有 Type，尝试通过 Relationship 解析
+          if (!npType) {
+              const relationship = np.getAttribute("Relationship");
+              const toRole = np.getAttribute("ToRole");
+              
+              if (relationship && toRole) {
+                  // Relationship 可能是 "NorthwindModel.FK_Order_Customer"
+                  const roles = associationMap.get(relationship);
+                  if (roles) {
+                      npType = roles.get(toRole) || null;
+                  } else {
+                      // 尝试去掉命名空间查找
+                      const shortName = relationship.split('.').pop();
+                      if (shortName) {
+                          const rolesShort = associationMap.get(shortName);
+                          if (rolesShort) {
+                              npType = rolesShort.get(toRole) || null;
+                          }
+                      }
+                  }
+              }
+          }
+
+          if (npName && npType) {
+            navProperties.push({
+                name: npName,
+                type: npType
+            });
+          }
+        }
+
+        entities.push({
+          name,
+          keys,
+          properties,
+          navigationProperties: navProperties
+        });
       }
-    }
+  });
 
-    // 解析属性
-    const properties: ODataProperty[] = [];
-    const props = getElementsByLocalName(et, "Property");
-    for (const p of props) {
-      properties.push({
-        name: p.getAttribute("Name") || "",
-        type: p.getAttribute("Type") || "",
-        nullable: p.getAttribute("Nullable") !== "false"
-      });
-    }
-
-    // 解析导航属性
-    const navProperties: ODataNavigationProperty[] = [];
-    const navProps = getElementsByLocalName(et, "NavigationProperty");
-    for (const np of navProps) {
-      let type = np.getAttribute("Type") || "";
-      // V2/V3 有时使用 Relationship 属性，这里暂主要支持 V4 风格或通过 Type 属性
-      // 如果没有 Type，尝试从 Association 解析 (V2)，这里暂时略过复杂 V2 Association 解析，
-      // 只要有 Name 就加上
-      navProperties.push({
-        name: np.getAttribute("Name") || "",
-        type: type
-      });
-    }
-
-    entities.push({
-      name,
-      keys,
-      properties,
-      navigationProperties: navProperties
-    });
-  }
-
-  // 解析 EntitySets (容器)
   const entitySets: { name: string; entityType: string }[] = [];
-  const entityContainers = getElementsByLocalName(schemaNode, "EntityContainer");
-  
-  // 有些 V2 版本 EntityContainer 在 Schema 下直接有，或者在其他 Schema 中
-  // 这里简单处理：查找当前 Schema 或 全局搜索
-  const container = entityContainers.length > 0 ? entityContainers[0] : getElementsByLocalName(xmlDoc, "EntityContainer")[0];
-  
-  if (container) {
-    const sets = getElementsByLocalName(container, "EntitySet");
-    for (const set of sets) {
-      entitySets.push({
-        name: set.getAttribute("Name") || "",
-        entityType: set.getAttribute("EntityType") || ""
-      });
-    }
+  // 查找 EntityContainer
+  // 遍历所有 Schema 查找 EntityContainer
+  for (const schema of schemas) {
+      const containers = getElementsByLocalName(schema, "EntityContainer");
+      for (const container of containers) {
+          const sets = getElementsByLocalName(container, "EntitySet");
+          for (const set of sets) {
+              entitySets.push({
+                  name: set.getAttribute("Name") || "",
+                  entityType: set.getAttribute("EntityType") || ""
+              });
+          }
+      }
   }
 
   return {
-    namespace,
+    namespace: mainNamespace,
     version,
     entities,
     entitySets
   };
 };
 
-/**
- * 判断当前页面/内容是否是 OData 服务 (被动检测)
- */
 export const isODataPage = (doc: Document, url: string, force: boolean = false): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
-    // ... 保持原有逻辑不变，只修改了上面的 parseODataMetadata ...
     const contentType = doc.contentType;
     if (force) {
         if (contentType.includes('xml') || contentType.includes('json') || url.includes('$metadata')) {
@@ -159,26 +203,22 @@ export const isODataPage = (doc: Document, url: string, force: boolean = false):
 
     if (contentType.includes('xml')) {
         const rootNodeName = doc.documentElement.nodeName;
-        if (rootNodeName.includes('Edmx') || doc.documentElement.localName === 'Edmx') {
+        // 兼容 V2/V3/V4
+        if (rootNodeName.toLowerCase().includes('edmx')) {
             return { isOData: true, type: 'metadata' };
         }
         if (rootNodeName === 'service' || rootNodeName.endsWith(':service')) {
             return { isOData: true, type: 'serviceDoc' };
         }
         if (rootNodeName === 'feed' || rootNodeName.endsWith(':feed')) {
-             if (doc.documentElement.innerHTML.includes('schemas.microsoft.com/ado')) {
-                 return { isOData: true, type: 'data' };
-             }
+             return { isOData: true, type: 'data' };
         }
     }
 
     const bodyText = doc.body ? doc.body.innerText : '';
     if (bodyText.trim().startsWith('{')) {
-        if (bodyText.includes('@odata.context')) {
+        if (bodyText.includes('@odata.context') || bodyText.includes('__metadata')) {
              return { isOData: true, type: bodyText.includes('$metadata') ? 'metadata' : 'data' };
-        }
-        if (bodyText.includes('__metadata') && bodyText.includes('"uri":')) {
-            return { isOData: true, type: 'data' };
         }
     }
 
@@ -191,7 +231,10 @@ export const isODataPage = (doc: Document, url: string, force: boolean = false):
 
 export const inferMetadataUrl = (url: string): string => {
     if (url.toLowerCase().endsWith('$metadata')) return url;
-    let baseUrl = url.split('?')[0];
+    // Handle hash fragments
+    let baseUrl = url.split('#')[0]; 
+    baseUrl = baseUrl.split('?')[0];
+    
     if (baseUrl.includes('.svc')) {
         const parts = baseUrl.split('.svc');
         return `${parts[0]}.svc/$metadata`;
