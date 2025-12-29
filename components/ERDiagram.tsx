@@ -1,287 +1,172 @@
-import React, { useEffect, useRef } from 'react';
-import { Graph, Path } from '@antv/x6';
-import { register } from '@antv/x6-react-shape';
-import { DagreLayout } from '@antv/layout';
-import { Scroller } from '@antv/x6-plugin-scroller';
-import '@antv/x6-plugin-scroller/es/index.css';
-import { ODataSchema, ODataEntity } from '../types';
+import React, { useMemo, useEffect } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+  Node,
+  Edge,
+  Position,
+} from '@xyflow/react';
+import dagre from 'dagre';
+import { ODataSchema } from '../types';
 import EntityNode from './EntityNode';
 
-register({
-  shape: 'entity-node',
-  width: 240, // 稍微缩窄宽度，更紧凑
-  height: 200, 
-  effect: ['data'],
-  component: EntityNode,
-});
-
-Graph.registerConnector(
-  'jumpover',
-  (sourcePoint, targetPoint, routePoints, options) => {
-    const path = new Path();
-    path.appendSegment(Path.createSegment('M', sourcePoint));
-    if (routePoints && routePoints.length) {
-       routePoints.forEach(p => path.appendSegment(Path.createSegment('L', p)));
-    }
-    path.appendSegment(Path.createSegment('L', targetPoint));
-    return path.serialize();
-  },
-  true,
-);
+// 定义自定义节点类型
+const nodeTypes = {
+  entity: EntityNode,
+};
 
 interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// === 高度常量配置 (已更新为无图标紧凑模式) ===
-// 必须与 EntityNode.tsx 完全对应
-const CONSTANTS = {
-    HEADER_HEIGHT: 36,
-    ROW_HEIGHT: 26,      // 用于 PK, Props, Nav Rows
-    NAV_HEADER_HEIGHT: 24,
-    BORDER_WIDTH: 2,
-};
+// 布局配置
+const NODE_WIDTH = 260; // 估算宽度
+const NODE_HEIGHT = 200; // 估算平均高度（用于布局计算，实际渲染高度自适应）
+const RANK_SEP = 80; // 层级间距 (水平)
+const NODE_SEP = 50; // 节点间距 (垂直)
 
-// 计算节点布局和端口位置
-const calculateNodeLayout = (entity: ODataEntity) => {
-    const pkCount = entity.keys.length;
-    const otherProps = entity.properties.filter(p => !entity.keys.includes(p.name));
-    const propCount = otherProps.length;
-    const navCount = entity.navigationProperties.length;
+const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-    const visibleProps = Math.min(propCount, 10);
-    const hasMoreProps = propCount > 10;
+  // 设置布局方向：LR (Left to Right) 适合 ER 图的外键流向
+  dagreGraph.setGraph({ rankdir: 'LR', ranksep: RANK_SEP, nodesep: NODE_SEP });
 
-    // 1. 计算总高度
-    let height = CONSTANTS.HEADER_HEIGHT;
-    height += pkCount * CONSTANTS.ROW_HEIGHT;
-    height += visibleProps * CONSTANTS.ROW_HEIGHT;
-    if (hasMoreProps) height += CONSTANTS.ROW_HEIGHT; // More row
+  nodes.forEach((node) => {
+    // 动态计算大致高度，让 dagre 布局更精准
+    const data = node.data as any;
+    const propCount = data.entity.properties.length;
+    const navCount = data.entity.navigationProperties.length;
+    // 简单估算：Header 40 + Props * 24 + Navs * 28
+    const estimatedHeight = 40 + (Math.min(propCount, 8) * 24) + (navCount * 28) + 40;
     
-    // 导航栏起始位置
-    const navStartY = height + CONSTANTS.NAV_HEADER_HEIGHT;
+    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: estimatedHeight });
+  });
 
-    if (navCount > 0) {
-        height += CONSTANTS.NAV_HEADER_HEIGHT;
-        height += navCount * CONSTANTS.ROW_HEIGHT;
-    }
-    
-    height += 2; // 底部边框微调
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
 
-    // 2. 生成端口
-    const ports: any[] = [];
-    
-    // 入口：左侧中心
-    ports.push({
-        id: 'in-port',
-        group: 'left',
-    });
+  dagre.layout(dagreGraph);
 
-    // 出口：每个导航属性行的右侧
-    entity.navigationProperties.forEach((nav, index) => {
-        const y = navStartY + (index * CONSTANTS.ROW_HEIGHT) + (CONSTANTS.ROW_HEIGHT / 2);
-        
-        ports.push({
-            id: `out-${nav.name}`,
-            group: 'right-absolute',
-            args: { y: y },
-        });
-    });
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - NODE_WIDTH / 2,
+        y: nodeWithPosition.y - (nodeWithPosition.height / 2),
+      },
+      targetPosition: Position.Left,
+      sourcePosition: Position.Right,
+    };
+  });
 
-    return { height, ports };
+  return { nodes: layoutedNodes, edges };
 };
 
 const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const graphRef = useRef<Graph | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
+  // 将 Schema 转换为 React Flow 数据结构
   useEffect(() => {
-    if (!containerRef.current || !schema) return;
+    if (!schema) return;
 
-    const graph = new Graph({
-      container: containerRef.current,
-      autoResize: true,
-      panning: true,
-      mousewheel: {
-        enabled: true,
-        modifiers: ['ctrl', 'meta'],
-        maxScale: 3,
-        minScale: 0.2,
-      },
-      background: { color: '#f8fafc' },
-      grid: {
-        visible: true,
-        type: 'dot',
-        args: [{ color: '#cbd5e1', thickness: 1 }],
-      },
-      ports: {
-          groups: {
-              'left': {
-                  position: 'left',
-                  attrs: {
-                      circle: { r: 3, magnet: true, stroke: '#64748b', strokeWidth: 1, fill: '#fff' },
-                  },
-              },
-              'right-absolute': {
-                  position: 'absolute',
-                  attrs: {
-                      circle: { r: 3, magnet: true, stroke: '#64748b', strokeWidth: 1, fill: '#fff' },
-                  },
-                  args: { x: '100%' },
-              },
-          },
-      },
-      connecting: {
-        router: {
-            name: 'manhattan',
-            args: {
-                padding: 20,
-                step: 10,
-            }
-        },
-        connector: {
-            name: 'jumpover',
-            args: { radius: 0 }, // 直角，更像经典 ER 图
-        },
-        anchor: 'center',
-        connectionPoint: 'boundary',
-      },
-      interaction: {
-        nodeMovable: true,
-        edgeMovable: false,
-      }
-    });
-
-    graph.use(new Scroller({ enabled: true, pannable: true }));
-    graphRef.current = graph;
-
-    const nodes: any[] = [];
-    const edges: any[] = [];
+    const rawNodes: Node[] = [];
+    const rawEdges: Edge[] = [];
     const entityMap = new Map<string, string>();
 
+    // 建立名称映射表
     schema.entities.forEach(e => {
         entityMap.set(e.name, e.name);
         if (schema.namespace) entityMap.set(`${schema.namespace}.${e.name}`, e.name);
     });
 
-    // 生成节点
+    // 1. 生成节点
     schema.entities.forEach((entity) => {
-        const { height, ports } = calculateNodeLayout(entity);
-        nodes.push({
-            id: entity.name,
-            shape: 'entity-node',
-            width: 240,
-            height: height,
-            ports: ports,
-            data: { entity },
-        });
+      rawNodes.push({
+        id: entity.name,
+        type: 'entity',
+        position: { x: 0, y: 0 }, // 初始位置，会被布局覆盖
+        data: { entity },
+      });
     });
 
-    // 生成连线
+    // 2. 生成连线
     schema.entities.forEach((entity) => {
-        entity.navigationProperties.forEach((nav) => {
-            let rawTargetType = nav.type;
-            const isCollection = rawTargetType.startsWith('Collection(');
-            if (isCollection) rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
+      entity.navigationProperties.forEach((nav) => {
+        let rawTargetType = nav.type;
+        const isCollection = rawTargetType.startsWith('Collection(');
+        if (isCollection) rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
 
-            let targetId = entityMap.get(rawTargetType);
-            if (!targetId) {
-                const shortName = rawTargetType.split('.').pop();
-                if (shortName && entityMap.has(shortName)) targetId = entityMap.get(shortName);
-            }
-
-            if (targetId && entityMap.has(targetId)) {
-                // 经典灰黑色连线
-                const edgeColor = '#64748b'; 
-                
-                edges.push({
-                    id: `${entity.name}-${nav.name}-${targetId}`,
-                    source: { 
-                        cell: entity.name, 
-                        port: `out-${nav.name}`, 
-                    },
-                    target: { 
-                        cell: targetId,
-                        port: 'in-port',
-                    },
-                    zIndex: 0,
-                    attrs: {
-                        line: {
-                            stroke: edgeColor,
-                            strokeWidth: 1, // 细线
-                            targetMarker: {
-                                name: isCollection ? 'crow' : 'block', // 经典鸦脚
-                                width: 8,
-                                height: 6,
-                                fill: edgeColor,
-                            },
-                        },
-                    },
-                });
-            }
-        });
-    });
-
-    // 布局计算
-    const dagreLayout = new DagreLayout({
-        type: 'dagre',
-        rankdir: 'TB', 
-        ranksep: 60,
-        nodesep: 50,
-        controlPoints: true,
-    });
-
-    const model = dagreLayout.layout({
-        nodes: nodes,
-        edges: edges.map(e => ({ source: e.source.cell, target: e.target.cell, id: e.id })), 
-    });
-
-    nodes.forEach(node => {
-        const layoutNode = model.nodes?.find((n: any) => n.id === node.id);
-        if (layoutNode) {
-            node.x = layoutNode.x;
-            node.y = layoutNode.y;
+        let targetId = entityMap.get(rawTargetType);
+        if (!targetId) {
+            const shortName = rawTargetType.split('.').pop();
+            if (shortName && entityMap.has(shortName)) targetId = entityMap.get(shortName);
         }
+
+        if (targetId && entityMap.has(targetId)) {
+          rawEdges.push({
+            id: `${entity.name}-${nav.name}-${targetId}`,
+            source: entity.name,
+            target: targetId,
+            sourceHandle: `source-${nav.name}`, // *** 关键：连接到具体的导航属性行 ***
+            type: 'step', // 直角连线，类似电路板/ER图风格
+            animated: false,
+            style: { stroke: '#64748b', strokeWidth: 1.5 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed, // 默认箭头
+              width: 20,
+              height: 20,
+              color: '#64748b',
+            },
+            // 如果是 1:N，可以加 label 或不同样式
+            label: isCollection ? '1..N' : '1..1',
+            labelStyle: { fill: '#94a3b8', fontSize: 10, fontWeight: 500 },
+            labelBgPadding: [2, 2],
+            labelBgBorderRadius: 4,
+            labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.8 },
+          });
+        }
+      });
     });
 
-    graph.fromJSON({ nodes, edges });
-    
-    setTimeout(() => {
-        graph.centerContent();
-        graph.zoomToFit({ padding: 40, maxScale: 1.0 });
-    }, 100);
+    // 3. 计算布局
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges);
 
-    // 简单的高亮效果
-    graph.on('node:mouseenter', ({ node }) => {
-        const connectedEdges = graph.getConnectedEdges(node);
-        connectedEdges.forEach(edge => {
-            edge.attr('line/stroke', '#2563eb'); // blue-600
-            edge.attr('line/strokeWidth', 2);
-            edge.toFront();
-        });
-    });
-    graph.on('node:mouseleave', ({ node }) => {
-        const connectedEdges = graph.getConnectedEdges(node);
-        connectedEdges.forEach(edge => {
-            edge.attr('line/stroke', '#64748b');
-            edge.attr('line/strokeWidth', 1);
-        });
-    });
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
 
-    return () => {
-      graph.dispose();
-    };
-  }, [schema]);
+  }, [schema, setNodes, setEdges]);
 
   return (
-    <div className="w-full h-full relative group bg-slate-50">
-        <div ref={containerRef} className="w-full h-full" />
-        {/* 保留简单的缩放控制 */}
-        <div className="absolute top-4 right-4 flex flex-col gap-1 bg-white border border-slate-300 rounded shadow p-1 z-10">
-            <button onClick={() => graphRef.current?.zoom(0.1)} className="p-1 hover:bg-slate-100 text-slate-600 font-bold">+</button>
-            <button onClick={() => graphRef.current?.zoom(-0.1)} className="p-1 hover:bg-slate-100 text-slate-600 font-bold">-</button>
-            <button onClick={() => graphRef.current?.zoomToFit({ padding: 40 })} className="p-1 hover:bg-slate-100 text-slate-600 text-xs">Fit</button>
-        </div>
+    <div className="w-full h-full bg-slate-50">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.1}
+        maxZoom={2}
+        defaultEdgeOptions={{ type: 'step' }} // 默认直角线
+      >
+        <Background color="#cbd5e1" gap={20} size={1} />
+        <Controls />
+        <MiniMap 
+            nodeColor={() => '#e2e8f0'} 
+            maskColor="rgba(240, 242, 245, 0.7)"
+            style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0' }}
+        />
+      </ReactFlow>
     </div>
   );
 };
