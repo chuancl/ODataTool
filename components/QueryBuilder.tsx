@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, Braces, List, Image as ImageIcon, Film } from 'lucide-react';
+import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, Braces, List, Image as ImageIcon, Film, Binary } from 'lucide-react';
 import { ODataSchema } from '../types';
 
 interface QueryBuilderProps {
@@ -21,6 +21,42 @@ const normalizeODataResponse = (data: any): any => {
         return data.d;
     }
     return data;
+};
+
+// 简单的 MIME 检测
+const detectImageMimeType = (b64: string): string | null => {
+    if (b64.startsWith('/9j/')) return 'image/jpeg';
+    if (b64.startsWith('iVBOR')) return 'image/png';
+    if (b64.startsWith('R0lGOD')) return 'image/gif';
+    if (b64.startsWith('Qk0')) return 'image/bmp';
+    if (b64.startsWith('SUkq') || b64.startsWith('II*')) return 'image/tiff';
+    if (b64.startsWith('UklGR')) return 'image/webp';
+    return null; 
+};
+
+// Northwind OLE Header 清理工具
+// Northwind 数据库中的图片通常包裹了 78 字节的 OLE Header
+// Base64 中 78 字节大约对应 104 个字符
+const cleanBase64 = (b64: string): { src: string, isImage: boolean } => {
+    // 1. 尝试检测标准头部
+    let mime = detectImageMimeType(b64);
+    if (mime) {
+        return { src: `data:${mime};base64,${b64}`, isImage: true };
+    }
+
+    // 2. 尝试检测 Northwind 特有的 OLE Header (通常以 FRwv 开头)
+    if (b64.startsWith('FRwv') || b64.length > 104) {
+        // 尝试剥离前 104 个字符 (78 bytes)
+        const stripped = b64.substring(104);
+        mime = detectImageMimeType(stripped);
+        if (mime) {
+             return { src: `data:${mime};base64,${stripped}`, isImage: true };
+        }
+    }
+
+    // 3. 如果都不是，但确实是二进制数据，可以尝试盲猜 BMP (legacy default)
+    // 但为了不显示错误图片，这里返回原始 base64 但标记 isImage 为 false，交给 UI 决定是否强制渲染
+    return { src: `data:image/bmp;base64,${b64}`, isImage: false };
 };
 
 // --- 组件定义 ---
@@ -223,8 +259,14 @@ const XmlNode: React.FC<{ node: Node }> = ({ node }) => {
     );
 };
 
-// 3. 表格渲染组件 (支持多媒体)
-const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => void }> = ({ data, onDrillDown }) => {
+// 3. 表格渲染组件
+interface DataTableProps {
+    data: any; 
+    onDrillDown: (key: string, val: any) => void;
+    columnTypes?: Map<string, string>; // 可选：列的类型定义
+}
+
+const DataTable: React.FC<DataTableProps> = ({ data, onDrillDown, columnTypes }) => {
     // 规范化后的数据可能是数组，也可能是单个对象
     if (Array.isArray(data)) {
         if (data.length === 0) return <div className="p-8 text-center text-slate-400 text-xs italic flex flex-col items-center"><List className="w-8 h-8 mb-2 opacity-20"/>无数据 (Empty Array)</div>;
@@ -266,7 +308,16 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
                         <tr>
                             <th className="p-2 border border-slate-200 w-10 text-center font-mono bg-slate-50">#</th>
                             {columns.map(col => (
-                                <th key={col} className="p-2 border border-slate-200 font-semibold whitespace-nowrap bg-slate-50">{col}</th>
+                                <th key={col} className="p-2 border border-slate-200 font-semibold whitespace-nowrap bg-slate-50">
+                                    <div className="flex items-center gap-1">
+                                        {col}
+                                        {columnTypes?.get(col) === 'Edm.Binary' && (
+                                            <span title="Binary Data">
+                                                <Binary className="w-3 h-3 text-slate-400" />
+                                            </span>
+                                        )}
+                                    </div>
+                                </th>
                             ))}
                         </tr>
                     </thead>
@@ -276,7 +327,12 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
                                 <td className="p-2 border border-slate-200 text-center text-slate-400 font-mono select-none bg-white group-hover:bg-slate-50">{idx + 1}</td>
                                 {columns.map(col => (
                                     <td key={col} className="p-2 border border-slate-200 font-mono text-slate-700 whitespace-nowrap max-w-[400px] overflow-hidden text-ellipsis align-top">
-                                        <DataCell value={row[col]} colName={col} onDrill={() => onDrillDown(`${idx}.${col}`, row[col])} />
+                                        <DataCell 
+                                            value={row[col]} 
+                                            colName={col} 
+                                            dataType={columnTypes?.get(col)}
+                                            onDrill={() => onDrillDown(`${idx}.${col}`, row[col])} 
+                                        />
                                     </td>
                                 ))}
                             </tr>
@@ -292,9 +348,19 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
                     <tbody>
                         {Object.entries(data).map(([key, val]) => (
                             <tr key={key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                                <td className="py-3 px-4 font-semibold text-slate-600 w-1/4 bg-slate-50/50 border-r border-slate-100">{key}</td>
+                                <td className="py-3 px-4 font-semibold text-slate-600 w-1/4 bg-slate-50/50 border-r border-slate-100">
+                                    <div className="flex items-center gap-1">
+                                        {key}
+                                        {columnTypes?.get(key) === 'Edm.Binary' && <Binary className="w-3 h-3 text-slate-400" />}
+                                    </div>
+                                </td>
                                 <td className="py-3 px-4 font-mono text-slate-700 bg-white">
-                                     <DataCell value={val} colName={key} onDrill={() => onDrillDown(key, val)} />
+                                     <DataCell 
+                                        value={val} 
+                                        colName={key} 
+                                        dataType={columnTypes?.get(key)}
+                                        onDrill={() => onDrillDown(key, val)} 
+                                     />
                                 </td>
                             </tr>
                         ))}
@@ -306,8 +372,15 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
     return <div className="p-4 font-mono text-sm">{String(data)}</div>;
 };
 
-// 4. 增强的单元格渲染 (Base64图片, 媒体链接)
-const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> = ({ value, colName, onDrill }) => {
+// 4. 增强的单元格渲染
+interface DataCellProps {
+    value: any;
+    colName: string;
+    dataType?: string;
+    onDrill: () => void;
+}
+
+const DataCell: React.FC<DataCellProps> = ({ value, colName, dataType, onDrill }) => {
     if (value === null || value === undefined) return <span className="text-slate-300 italic">null</span>;
     
     // 数组
@@ -335,7 +408,7 @@ const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> =
     
     const str = String(value);
 
-    // 1. Base64 图片检测
+    // 1. 已知的 Base64 图片 Prefix (data:image/...)
     if (str.startsWith('data:image/')) {
         return (
             <div className="group relative inline-block">
@@ -377,9 +450,48 @@ const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> =
                 </div>
             )
         }
-
         // 普通链接
         return <a href={str} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1 break-all" onClick={e=>e.stopPropagation()}>{str}</a>
+    }
+
+    // 3. Edm.Binary 或 疑似 Base64 图片 (包含 Northwind OLE 处理)
+    // 如果明确是 Binary 类型，或者字符串很长且像 Base64
+    const isExplicitBinary = dataType === 'Edm.Binary';
+    const looksLikeBase64 = str.length > 100 && !str.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(str.substring(0, 50));
+
+    if (isExplicitBinary || looksLikeBase64) {
+        const { src, isImage } = cleanBase64(str);
+        
+        // 如果检测到有效的图片头，直接渲染
+        if (isImage) {
+            return (
+                <div className="group relative inline-block">
+                    <img src={src} alt="Binary Image" className="h-16 w-auto object-contain border border-slate-200 rounded bg-slate-50 hover:scale-[3] hover:shadow-xl hover:z-50 transition-all origin-left" />
+                    <span className="text-[10px] text-slate-400 block mt-0.5 font-mono">Image ({Math.round(str.length / 1024)} KB)</span>
+                </div>
+            );
+        }
+
+        // 如果是 Binary 但没检测到已知头，提供一个按钮尝试强制渲染
+        // 特别是针对 Northwind 这种 legacy OLE，如果 cleanBase64 失败，我们也允许用户尝试
+        return (
+            <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-mono border px-1.5 py-0.5 rounded bg-slate-50">Binary ({Math.round(str.length / 1024)} KB)</span>
+                <button 
+                    onClick={(e) => {
+                        // 强制在新窗口打开 base64
+                        const w = window.open("");
+                        if (w) {
+                            w.document.write(`<img src="${src}" />`);
+                        }
+                    }}
+                    className="text-[10px] text-indigo-600 hover:underline"
+                    title="Try to view as image"
+                >
+                    View Image
+                </button>
+            </div>
+        );
     }
 
     // Bool / Number highlighting
@@ -434,6 +546,15 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     const typeName = setDef.entityType.split('.').pop(); 
     return schema.entities.find(e => e.name === typeName || e.name === setDef.entityType);
   }, [selectedSet, schema]);
+
+  // 构建当前 Entity 的字段类型 Map，用于传给 Table 渲染
+  const rootColumnTypes = useMemo(() => {
+      const map = new Map<string, string>();
+      if (currentEntity) {
+          currentEntity.properties.forEach(p => map.set(p.name, p.type));
+      }
+      return map;
+  }, [currentEntity]);
 
   // 切换 EntitySet 重置状态
   useEffect(() => {
@@ -862,6 +983,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
                                 <DataTable 
                                     data={currentTableData} 
                                     onDrillDown={handleDrillDown} 
+                                    columnTypes={drillStack.length === 0 ? rootColumnTypes : undefined}
                                 />
                             </div>
                        </div>
