@@ -15,7 +15,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "@antv/x6": "^2.18.1",
-    "@antv/x6-react-shape": "^2.2.4",
+    "@antv/x6-react-shape": "^2.0.0",
     "@antv/layout": "^0.3.25",
     "@antv/x6-plugin-scroller": "^2.0.10"
   },

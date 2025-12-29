@@ -3,6 +3,7 @@ import { Graph, Path } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 import { DagreLayout } from '@antv/layout';
 import { Scroller } from '@antv/x6-plugin-scroller';
+import '@antv/x6-plugin-scroller/es/index.css'; // 引入 Scroller 样式
 import { ODataSchema, ODataEntity } from '../types';
 import EntityNode from './EntityNode';
 
@@ -138,8 +139,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
             width: 260,
             height: estimateHeight(entity),
             data: { entity },
-            // 定义端口：虽然 React 组件内部已经有 magnet，
-            // 但为了布局引擎识别连接方向，我们最好只定义连线逻辑，端口由组件 DOM 决定
         });
     });
 
@@ -166,11 +165,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
                     source: { 
                         cell: entity.name, 
                         // 关键：尝试连接到具体的导航属性行
-                        // 在 EntityNode 中，我们给每一行加了 id={`nav-${nav.name}`} 和 magnet="true"
-                        // X6 支持 selector 选择器来定位 source magnet
-                        // 但是 React Shape 渲染是异步且 shadow DOM 隔离的，直接 selector 有时不稳定。
-                        // 这里最稳妥的是直接连到节点，但让路由去优化。
-                        // 如果要精确连接，需要 selector: `[id="nav-${nav.name}"]`
                         selector: `[id="nav-${nav.name}"]`
                     },
                     target: targetId,
@@ -228,7 +222,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
 
     const model = dagreLayout.layout({
         nodes: nodes,
-        edges: edges.map(e => ({ source: e.source.cell || e.source, target: e.target, id: e.id })), // 简化 edge 对象给 layout 计算用
+        edges: edges.map(e => ({ source: e.source.cell || e.source, target: e.target, id: e.id })), 
     });
 
     // 应用布局坐标
@@ -246,7 +240,6 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
     // 5. 自动适配
     setTimeout(() => {
         graph.centerContent();
-        // 如果图太小，就缩放一下
         graph.zoomToFit({ padding: 40, maxScale: 1.5 });
     }, 100);
 
