@@ -16,12 +16,23 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
   const otherProperties = entity.properties.filter(p => !entity.keys.includes(p.name));
 
   return (
-    <div className="shadow-2xl rounded-md overflow-hidden border border-slate-600 bg-slate-800 min-w-[200px] max-w-[280px] font-sans text-xs">
-      {/* React Flow Handles - 设置为不可见，分布在四周以实现自动连线优化 */}
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-none" />
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-none" />
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-none" id="l" />
-      <Handle type="source" position={Position.Right} className="!bg-transparent !border-none" id="r" />
+    <div className="shadow-2xl rounded-md overflow-hidden border border-slate-600 bg-slate-800 min-w-[200px] max-w-[280px] font-sans text-xs relative group">
+      {/* 
+        修复核心问题：
+        1. 仅保留 Left (Target) 和 Right (Source) 以匹配从左到右的布局。
+        2. 移除 id 属性，使其成为默认 Handle，这样 Edge 不需要指定 sourceHandle/targetHandle 即可自动连接。
+        3. 增加 !w-2 !h-2 等样式，虽然设置为透明，但确保有点击/连接区域。
+      */}
+      <Handle 
+        type="target" 
+        position={Position.Left} 
+        className="!bg-slate-400 !w-1 !h-4 !rounded-sm !border-none -ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity" 
+      />
+      <Handle 
+        type="source" 
+        position={Position.Right} 
+        className="!bg-slate-400 !w-1 !h-4 !rounded-sm !border-none -mr-0.5 opacity-0 group-hover:opacity-100 transition-opacity" 
+      />
 
       {/* 1. 标题栏 (Header) */}
       <div className="bg-slate-700 p-2 border-b border-slate-600 flex justify-between items-center">

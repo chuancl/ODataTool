@@ -44,17 +44,16 @@ const getDagreGraph = () => {
 // 2. 智能布局 (Dagre)
 const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   const dagreGraph = getDagreGraph();
-  if (!dagreGraph) return null; // 失败则返回 null，触发兜底
+  if (!dagreGraph) return null;
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 100, ranksep: 300 });
+  // 增加节点间距，避免连线穿过节点
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 350 });
 
-  // 必须确保所有节点都在 graph 中
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 280, height: 300 }); // 估算节点尺寸
+    dagreGraph.setNode(node.id, { width: 300, height: 400 }); 
   });
 
-  // 必须过滤掉悬空的 edge (即 source 或 target 不在 nodes 里的)
   const nodeIds = new Set(nodes.map(n => n.id));
   const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
@@ -79,13 +78,12 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
 
   return nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
-    // 如果某个节点被孤立导致没计算位置，保持原位
     if (!nodeWithPosition) return node;
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - 140,
-        y: nodeWithPosition.y - 150,
+        x: nodeWithPosition.x - 150,
+        y: nodeWithPosition.y - 200,
       },
       targetPosition: 'left',
       sourcePosition: 'right',
@@ -114,11 +112,9 @@ const getGridLayout = (nodes: Node[]) => {
 const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     const { fitView } = useReactFlow();
     
-    // 初始化状态 (先为空)
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-    // 核心数据处理逻辑
     useEffect(() => {
         if (!schema || !schema.entities || schema.entities.length === 0) {
             setNodes([]);
@@ -129,39 +125,32 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         const rawNodes: Node[] = [];
         const rawEdges: Edge[] = [];
         
-        // 1. 构建节点 ID 映射表，用于处理命名空间 (Namespace.Entity -> Entity)
-        const entityMap = new Map<string, string>(); // FullName/ShortName -> ID
+        const entityMap = new Map<string, string>(); 
         schema.entities.forEach(e => {
-            entityMap.set(e.name, e.name); // Order -> Order
+            entityMap.set(e.name, e.name);
             if (schema.namespace) {
-                entityMap.set(`${schema.namespace}.${e.name}`, e.name); // Northwind.Order -> Order
+                entityMap.set(`${schema.namespace}.${e.name}`, e.name);
             }
         });
 
-        // 2. 生成基础节点
         schema.entities.forEach((entity) => {
             rawNodes.push({
                 id: entity.name,
                 type: 'entity',
                 data: { entity },
-                position: { x: 0, y: 0 }, // 初始位置
+                position: { x: 0, y: 0 }, 
             });
         });
 
-        // 3. 生成连线
         schema.entities.forEach((entity) => {
             entity.navigationProperties.forEach((nav) => {
-                // 解析目标类型：Collection(NorthwindModel.Order) -> NorthwindModel.Order
                 let rawTargetType = nav.type;
                 const isCollection = rawTargetType.startsWith('Collection(');
                 if (isCollection) {
                     rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
                 }
 
-                // 尝试匹配目标 ID
                 let targetId = entityMap.get(rawTargetType);
-                
-                // 如果没匹配到，尝试去掉命名空间再匹配一次
                 if (!targetId) {
                     const shortName = rawTargetType.split('.').pop();
                     if (shortName && entityMap.has(shortName)) {
@@ -169,37 +158,33 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     }
                 }
 
-                // 只有当目标节点存在，且不是自引用(可选)时，才创建连线
                 if (targetId && entityMap.has(targetId)) {
                     const edgeId = `${entity.name}-${nav.name}-${targetId}`;
                     rawEdges.push({
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
-                        type: 'smoothstep', // 直角连线更整洁
+                        type: 'smoothstep', // 使用直角折线，比默认的 bezier 更适合 ER 图
+                        animated: false,
+                        zIndex: 1000, // 确保连线在顶层
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#3b82f6', fontWeight: 700, fontSize: 10 },
-                        labelBgStyle: { fill: '#eff6ff', fillOpacity: 0.9 },
-                        style: { stroke: '#3b82f6', strokeWidth: 1.5 },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
+                        labelStyle: { fill: '#0ea5e9', fontWeight: 800, fontSize: 11 },
+                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85, rx: 4, ry: 4 },
+                        style: { stroke: '#0ea5e9', strokeWidth: 2 },
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
                     });
                 }
             });
         });
 
-        // 4. 执行布局计算
         let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
-        
-        // 5. 如果智能布局失败，使用网格布局
         if (!layoutedNodes) {
-            console.warn("Layout fallback triggered");
             layoutedNodes = getGridLayout(rawNodes);
         }
 
         setNodes(layoutedNodes);
         setEdges(rawEdges);
 
-        // 6. 强制适配视图
         setTimeout(() => {
             window.requestAnimationFrame(() => {
                 fitView({ padding: 0.2, duration: 600 });
@@ -209,7 +194,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     }, [schema, fitView, setNodes, setEdges]);
 
 
-    // 即使没有节点，也不要显示 Loading 阻塞界面，而是显示空状态或者网格
     if (!schema || !schema.entities || schema.entities.length === 0) {
         return (
             <div className="flex items-center justify-center h-full text-slate-400">
@@ -238,13 +222,11 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             <Panel position="top-right" className="flex gap-2">
                 <button 
                     onClick={() => {
-                        // 强制重新布局 (网格)
                         const gridNodes = getGridLayout(nodes);
                         setNodes(gridNodes);
                         setTimeout(() => fitView({ duration: 500 }), 50);
                     }}
                     className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
-                    title="Switch to Grid Layout"
                 >
                     Grid Layout
                 </button>
@@ -261,7 +243,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
 const ERDiagram: React.FC<ERDiagramProps> = (props) => {
     return (
-        // 确保容器有明确的尺寸，flex-1 和 relative 很重要
         <div className="w-full h-full flex-1 relative min-h-[500px] bg-slate-50">
             <ReactFlowProvider>
                 <ERDiagramInner {...props} />
