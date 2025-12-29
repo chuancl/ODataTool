@@ -24,9 +24,6 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// --- 布局算法区域 ---
-
-// 1. 获取 Dagre 实例 (兼容处理)
 const getDagreGraph = () => {
     try {
         // @ts-ignore
@@ -36,22 +33,19 @@ const getDagreGraph = () => {
         // @ts-ignore
         return new dagre.Graph(); 
     } catch(e) {
-        console.warn("Dagre load failed, fallback to grid layout.", e);
         return null;
     }
 };
 
-// 2. 智能布局 (Dagre)
 const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   const dagreGraph = getDagreGraph();
   if (!dagreGraph) return null;
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  // 增加节点间距，避免连线穿过节点
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 350 });
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 300 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 300, height: 400 }); 
+    dagreGraph.setNode(node.id, { width: 300, height: 350 }); 
   });
 
   const nodeIds = new Set(nodes.map(n => n.id));
@@ -72,7 +66,6 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
           return null;
       }
   } catch (e) {
-      console.error("Dagre layout calculation failed", e);
       return null;
   }
 
@@ -83,19 +76,19 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
       ...node,
       position: {
         x: nodeWithPosition.x - 150,
-        y: nodeWithPosition.y - 200,
+        y: nodeWithPosition.y - 175,
       },
-      targetPosition: 'left',
-      sourcePosition: 'right',
+      // 重要：移除固定的 position，让 React Flow 自动根据 handle 计算最近路径
+      // targetPosition: 'left',
+      // sourcePosition: 'right',
     };
   });
 };
 
-// 3. 简易网格布局 (兜底方案)
 const getGridLayout = (nodes: Node[]) => {
     const COLUMNS = 4;
-    const X_SPACING = 350;
-    const Y_SPACING = 450;
+    const X_SPACING = 380;
+    const Y_SPACING = 500;
     
     return nodes.map((node, index) => ({
         ...node,
@@ -103,8 +96,6 @@ const getGridLayout = (nodes: Node[]) => {
             x: (index % COLUMNS) * X_SPACING,
             y: Math.floor(index / COLUMNS) * Y_SPACING
         },
-        targetPosition: 'left',
-        sourcePosition: 'right',
     }));
 };
 
@@ -139,6 +130,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 type: 'entity',
                 data: { entity },
                 position: { x: 0, y: 0 }, 
+                // 启用这些属性让用户可以拖动整理
+                draggable: true,
             });
         });
 
@@ -164,14 +157,16 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
-                        type: 'smoothstep', // 使用直角折线，比默认的 bezier 更适合 ER 图
+                        // 注意：这里不再指定 sourceHandle 和 targetHandle，
+                        // React Flow 会自动在 entity 上定义的 4 个 handle 中寻找最短路径
+                        type: 'smoothstep', 
                         animated: false,
-                        zIndex: 1000, // 确保连线在顶层
+                        zIndex: 1000, 
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#0ea5e9', fontWeight: 800, fontSize: 11 },
-                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85, rx: 4, ry: 4 },
-                        style: { stroke: '#0ea5e9', strokeWidth: 2 },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
+                        labelStyle: { fill: '#2563eb', fontWeight: 900, fontSize: 12 }, // 更亮的蓝色字体
+                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9, rx: 4, ry: 4 },
+                        style: { stroke: '#2563eb', strokeWidth: 2.5 }, // 加粗线条，使用亮蓝
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb' },
                     });
                 }
             });
@@ -228,7 +223,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     }}
                     className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
                 >
-                    Grid Layout
+                    Reset Grid
                 </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
