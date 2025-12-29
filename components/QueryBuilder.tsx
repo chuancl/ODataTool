@@ -1,97 +1,39 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, CornerDownRight, Braces, List } from 'lucide-react';
-import { ODataSchema, ODataEntity } from '../types';
+import { Play, Copy, Check, Filter, ArrowUpDown, Plus, X, ChevronRight, ChevronDown, Table as TableIcon, Code, FileJson, FileCode, ArrowLeft, Braces, List, Image as ImageIcon, Film } from 'lucide-react';
+import { ODataSchema } from '../types';
 
 interface QueryBuilderProps {
   schema: ODataSchema;
   metadataUrl: string;
 }
 
-// --- 工具函数 ---
+type TabType = 'json' | 'table' | 'xml';
+
+// --- 辅助工具 ---
 
 // 标准化 OData 响应数据 (兼容 V2 d.results 和 V4 value)
 const normalizeODataResponse = (data: any): any => {
     if (!data) return [];
-    // V4 Collection
-    if (Array.isArray(data.value)) return data.value;
-    // V2 Response Wrapper
+    if (Array.isArray(data.value)) return data.value; // V4
     if (data.d) {
-        // V2 Collection
-        if (Array.isArray(data.d.results)) return data.d.results;
-        // V2 Single/Collection without results
+        if (Array.isArray(data.d.results)) return data.d.results; // V2
         if (Array.isArray(data.d)) return data.d;
         return data.d;
     }
     return data;
 };
 
-// 简单的 XML 格式化工具
-const formatXml = (xml: string) => {
-    let formatted = '';
-    const reg = /(>)(<)(\/*)/g;
-    xml = xml.replace(reg, '$1\r\n$2$3');
-    let pad = 0;
-    xml.split('\r\n').forEach((node) => {
-        let indent = 0;
-        if (node.match(/.+<\/\w[^>]*>$/)) {
-            indent = 0;
-        } else if (node.match(/^<\/\w/)) {
-            if (pad !== 0) pad -= 1;
-        } else if (node.match(/^<\w[^>]*[^\/]>.*$/)) {
-            indent = 1;
-        } else {
-            indent = 0;
-        }
-
-        let padding = '';
-        for (let i = 0; i < pad; i++) {
-            padding += '  ';
-        }
-
-        formatted += padding + node + '\r\n';
-        pad += indent;
-    });
-    return formatted;
-};
-
 // --- 组件定义 ---
 
-// JSON 树节点组件
+// 1. JSON 树节点组件
 const JsonNode: React.FC<{ name?: string; value: any; isLast?: boolean; level?: number }> = ({ name, value, isLast, level = 0 }) => {
     const [expanded, setExpanded] = useState(true);
     
     // 基础类型渲染
-    if (value === null) return (
-        <div className="font-mono text-xs leading-5">
-            {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-            <span className="text-slate-400">null</span>
-            {!isLast && <span className="text-slate-500">,</span>}
-        </div>
-    );
-
-    if (typeof value === 'boolean') return (
-        <div className="font-mono text-xs leading-5">
-             {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-             <span className="text-purple-600 font-bold">{String(value)}</span>
-             {!isLast && <span className="text-slate-500">,</span>}
-        </div>
-    );
-
-    if (typeof value === 'number') return (
-        <div className="font-mono text-xs leading-5">
-             {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-             <span className="text-blue-600">{value}</span>
-             {!isLast && <span className="text-slate-500">,</span>}
-        </div>
-    );
-
-    if (typeof value === 'string') return (
-        <div className="font-mono text-xs leading-5 whitespace-pre-wrap break-all">
-             {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-             <span className="text-green-600">"{value}"</span>
-             {!isLast && <span className="text-slate-500">,</span>}
-        </div>
-    );
+    if (value === null) return <LineContent name={name} value="null" type="null" isLast={isLast} />;
+    if (typeof value === 'boolean') return <LineContent name={name} value={String(value)} type="boolean" isLast={isLast} />;
+    if (typeof value === 'number') return <LineContent name={name} value={value} type="number" isLast={isLast} />;
+    if (typeof value === 'string') return <LineContent name={name} value={`"${value}"`} type="string" isLast={isLast} />;
 
     // 复杂类型 (Object / Array)
     const isArray = Array.isArray(value);
@@ -101,39 +43,30 @@ const JsonNode: React.FC<{ name?: string; value: any; isLast?: boolean; level?: 
     const closeBracket = isArray ? ']' : '}';
     const itemCount = isArray ? value.length : keys.length;
 
-    if (isEmpty) return (
-        <div className="font-mono text-xs leading-5">
-            {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-            <span className="text-slate-600">{openBracket}{closeBracket}</span>
-            {!isLast && <span className="text-slate-500">,</span>}
-        </div>
-    );
+    if (isEmpty) return <LineContent name={name} value={`${openBracket}${closeBracket}`} type="plain" isLast={isLast} />;
 
     return (
         <div className="font-mono text-xs leading-5">
             <div className="flex items-start">
-                {/* Toggle Button */}
                 <button 
-                    onClick={() => setExpanded(!expanded)} 
-                    className="mr-1 mt-0.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} 
+                    className="mr-1 mt-0.5 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
                 >
                     {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                 </button>
 
-                {/* Key & Open Bracket */}
                 <div className="flex-1">
-                    {name && <span className="text-slate-700 mr-1">"{name}":</span>}
-                    <span className="text-slate-600">{openBracket}</span>
+                    {name && <span className="text-purple-700 mr-1">"{name}":</span>}
+                    <span className="text-slate-600 font-bold">{openBracket}</span>
                     
                     {!expanded && (
-                        <span className="text-slate-400 mx-1 cursor-pointer select-none" onClick={() => setExpanded(true)}>
-                            {itemCount} {itemCount === 1 ? 'item' : 'items'}...
+                        <span className="text-slate-400 mx-1 cursor-pointer select-none hover:text-slate-600 bg-slate-100 px-1 rounded" onClick={() => setExpanded(true)}>
+                            {itemCount} {itemCount === 1 ? 'item' : 'items'}
                         </span>
                     )}
 
-                    {/* Children */}
                     {expanded && (
-                        <div className="pl-4 border-l border-slate-100 ml-1">
+                        <div className="pl-4 border-l border-slate-200 ml-1.5 my-0.5">
                             {keys.map((key, idx) => (
                                 <JsonNode 
                                     key={key} 
@@ -146,9 +79,8 @@ const JsonNode: React.FC<{ name?: string; value: any; isLast?: boolean; level?: 
                         </div>
                     )}
 
-                    {/* Close Bracket */}
                     <div className={expanded ? "" : "inline"}>
-                        <span className="text-slate-600">{closeBracket}</span>
+                        <span className="text-slate-600 font-bold">{closeBracket}</span>
                         {!isLast && <span className="text-slate-500">,</span>}
                     </div>
                 </div>
@@ -157,15 +89,147 @@ const JsonNode: React.FC<{ name?: string; value: any; isLast?: boolean; level?: 
     );
 };
 
-// 表格渲染组件
+const LineContent = ({ name, value, type, isLast }: any) => (
+    <div className="font-mono text-xs leading-5 pl-5">
+        {name && <span className="text-purple-700 mr-1">"{name}":</span>}
+        <span className={`
+            ${type === 'string' ? 'text-green-600 break-all whitespace-pre-wrap' : ''}
+            ${type === 'number' ? 'text-blue-600' : ''}
+            ${type === 'boolean' ? 'text-orange-600 font-bold' : ''}
+            ${type === 'null' ? 'text-slate-400 italic' : ''}
+            ${type === 'plain' ? 'text-slate-600' : ''}
+        `}>{value}</span>
+        {!isLast && <span className="text-slate-500">,</span>}
+    </div>
+);
+
+// 2. XML 树节点组件
+const XmlViewer: React.FC<{ xmlString: string }> = ({ xmlString }) => {
+    const [xmlDoc, setXmlDoc] = useState<Document | null>(null);
+    const [error, setError] = useState<string>('');
+
+    useEffect(() => {
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(xmlString, "text/xml");
+            const parseError = doc.getElementsByTagName("parsererror");
+            if (parseError.length > 0) {
+                setError(parseError[0].textContent || "XML Parsing Error");
+                setXmlDoc(null);
+            } else {
+                setXmlDoc(doc);
+                setError('');
+            }
+        } catch (e) {
+            setError("Failed to parse XML");
+        }
+    }, [xmlString]);
+
+    if (error) return <div className="text-red-500 p-4 font-mono text-xs">{error}</div>;
+    if (!xmlDoc) return null;
+
+    return (
+        <div className="p-4 overflow-auto">
+             <XmlNode node={xmlDoc.documentElement} />
+        </div>
+    );
+};
+
+const XmlNode: React.FC<{ node: Node }> = ({ node }) => {
+    const [expanded, setExpanded] = useState(true);
+
+    if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent?.trim();
+        if (!text) return null;
+        return <span className="text-slate-700 break-all">{text}</span>;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+    const element = node as Element;
+    const tagName = element.nodeName;
+    const attributes = Array.from(element.attributes);
+    const hasChildren = element.childNodes.length > 0;
+    
+    // Check if it only contains a single text node (for compact rendering)
+    const isSingleTextNode = element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE;
+
+    return (
+        <div className="font-mono text-xs leading-5 ml-2">
+            <div className="flex items-start">
+                 {/* Expander */}
+                 {hasChildren && !isSingleTextNode ? (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} 
+                        className="mr-1 mt-0.5 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
+                    >
+                        {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                    </button>
+                 ) : (
+                    <span className="w-4 inline-block"></span>
+                 )}
+
+                 {/* Tag Start */}
+                 <div className="flex-1">
+                    <span className="text-blue-700">&lt;{tagName}</span>
+                    {attributes.map(attr => (
+                        <span key={attr.name} className="ml-1">
+                            <span className="text-purple-700">{attr.name}</span>
+                            <span className="text-slate-500">=</span>
+                            <span className="text-green-600">"{attr.value}"</span>
+                        </span>
+                    ))}
+                    
+                    {/* Compact View for Single Text Node */}
+                    {isSingleTextNode && (
+                        <span>
+                            <span className="text-blue-700">&gt;</span>
+                            <span className="text-slate-800 font-medium px-0.5">{element.textContent}</span>
+                            <span className="text-blue-700">&lt;/{tagName}&gt;</span>
+                        </span>
+                    )}
+
+                    {/* Standard View */}
+                    {!isSingleTextNode && (
+                        <>
+                            {hasChildren ? (
+                                <span className="text-blue-700">&gt;</span>
+                            ) : (
+                                <span className="text-blue-700"> /&gt;</span>
+                            )}
+
+                            {hasChildren && expanded && (
+                                <div className="pl-2 border-l border-slate-200 ml-1">
+                                    {Array.from(element.childNodes).map((child, i) => (
+                                        <XmlNode key={i} node={child} />
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {hasChildren && !expanded && (
+                                <span className="text-slate-400 mx-1 cursor-pointer select-none bg-slate-100 px-1 rounded" onClick={() => setExpanded(true)}>...</span>
+                            )}
+
+                            {hasChildren && (
+                                <div className={expanded ? "" : "inline"}>
+                                    <span className="text-blue-700">&lt;/{tagName}&gt;</span>
+                                </div>
+                            )}
+                        </>
+                    )}
+                 </div>
+            </div>
+        </div>
+    );
+};
+
+// 3. 表格渲染组件 (支持多媒体)
 const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => void }> = ({ data, onDrillDown }) => {
     // 规范化后的数据可能是数组，也可能是单个对象
     if (Array.isArray(data)) {
         if (data.length === 0) return <div className="p-8 text-center text-slate-400 text-xs italic flex flex-col items-center"><List className="w-8 h-8 mb-2 opacity-20"/>无数据 (Empty Array)</div>;
         
-        // 提取列名
         const firstRow = data[0];
-        // 如果数组元素是原始类型（如 string[]），特殊处理
         const isPrimitiveArray = typeof firstRow !== 'object' || firstRow === null;
 
         if (isPrimitiveArray) {
@@ -211,7 +275,7 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
                             <tr key={idx} className="hover:bg-slate-50 transition-colors group">
                                 <td className="p-2 border border-slate-200 text-center text-slate-400 font-mono select-none bg-white group-hover:bg-slate-50">{idx + 1}</td>
                                 {columns.map(col => (
-                                    <td key={col} className="p-2 border border-slate-200 font-mono text-slate-700 whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis">
+                                    <td key={col} className="p-2 border border-slate-200 font-mono text-slate-700 whitespace-nowrap max-w-[400px] overflow-hidden text-ellipsis align-top">
                                         <DataCell value={row[col]} colName={col} onDrill={() => onDrillDown(`${idx}.${col}`, row[col])} />
                                     </td>
                                 ))}
@@ -222,15 +286,14 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
             </div>
         );
     } else if (typeof data === 'object' && data !== null) {
-        // 单个对象视图
         return (
             <div className="overflow-x-auto p-4 flex justify-center">
-                 <table className="w-full max-w-3xl text-left border-collapse text-xs shadow-sm border border-slate-200 rounded-lg overflow-hidden">
+                 <table className="w-full max-w-4xl text-left border-collapse text-xs shadow-sm border border-slate-200 rounded-lg overflow-hidden">
                     <tbody>
                         {Object.entries(data).map(([key, val]) => (
                             <tr key={key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                                <td className="py-2.5 px-4 font-semibold text-slate-600 w-1/3 bg-slate-50/50 border-r border-slate-100">{key}</td>
-                                <td className="py-2.5 px-4 font-mono text-slate-700 bg-white">
+                                <td className="py-3 px-4 font-semibold text-slate-600 w-1/4 bg-slate-50/50 border-r border-slate-100">{key}</td>
+                                <td className="py-3 px-4 font-mono text-slate-700 bg-white">
                                      <DataCell value={val} colName={key} onDrill={() => onDrillDown(key, val)} />
                                 </td>
                             </tr>
@@ -243,10 +306,11 @@ const DataTable: React.FC<{ data: any; onDrillDown: (key: string, val: any) => v
     return <div className="p-4 font-mono text-sm">{String(data)}</div>;
 };
 
-// 单元格渲染
+// 4. 增强的单元格渲染 (Base64图片, 媒体链接)
 const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> = ({ value, colName, onDrill }) => {
     if (value === null || value === undefined) return <span className="text-slate-300 italic">null</span>;
     
+    // 数组
     if (Array.isArray(value)) {
         return (
             <button onClick={onDrill} className="flex items-center gap-1.5 text-indigo-600 hover:bg-indigo-50 px-2 py-0.5 rounded transition border border-transparent hover:border-indigo-100">
@@ -258,6 +322,7 @@ const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> =
         );
     }
     
+    // 对象
     if (typeof value === 'object') {
         return (
              <button onClick={onDrill} className="flex items-center gap-1.5 text-indigo-600 hover:bg-indigo-50 px-2 py-0.5 rounded transition border border-transparent hover:border-indigo-100">
@@ -269,20 +334,64 @@ const DataCell: React.FC<{ value: any; colName: string; onDrill: () => void }> =
     }
     
     const str = String(value);
-    if (str.startsWith('http')) {
-        return <a href={str} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1" onClick={e=>e.stopPropagation()}>{str}</a>
+
+    // 1. Base64 图片检测
+    if (str.startsWith('data:image/')) {
+        return (
+            <div className="group relative inline-block">
+                <img src={str} alt="Base64 Preview" className="h-12 w-auto object-contain border border-slate-200 rounded bg-slate-50 hover:scale-[3] hover:shadow-xl hover:z-50 transition-all origin-left" />
+                <span className="text-[10px] text-slate-400 block mt-0.5 truncate max-w-[100px]">{str.substring(0, 20)}...</span>
+            </div>
+        );
+    }
+
+    // 2. URL 图片/视频检测
+    if (str.startsWith('http') || str.startsWith('/')) {
+        const lowerStr = str.toLowerCase();
+        const isImg = /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/.test(lowerStr);
+        const isVideo = /\.(mp4|webm|ogg|mov)$/.test(lowerStr);
+
+        if (isImg) {
+            return (
+                <div className="flex flex-col items-start gap-1">
+                    <a href={str} target="_blank" rel="noreferrer" className="block relative group">
+                         <img src={str} alt="Preview" className="h-16 max-w-[150px] object-cover border border-slate-200 rounded shadow-sm group-hover:opacity-90" />
+                         <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition rounded text-white">
+                             <ImageIcon className="w-4 h-4" />
+                         </div>
+                    </a>
+                    <a href={str} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-[10px] truncate max-w-[150px] block" onClick={e=>e.stopPropagation()}>{str}</a>
+                </div>
+            )
+        }
+        
+        if (isVideo) {
+             return (
+                <div className="flex flex-col items-start gap-1">
+                    <div className="relative border border-slate-200 rounded bg-black overflow-hidden shadow-sm max-w-[200px]">
+                         <video src={str} controls className="h-24 w-auto object-contain" />
+                    </div>
+                     <a href={str} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-[10px] truncate max-w-[200px] flex items-center gap-1" onClick={e=>e.stopPropagation()}>
+                        <Film className="w-3 h-3" /> {str}
+                     </a>
+                </div>
+            )
+        }
+
+        // 普通链接
+        return <a href={str} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1 break-all" onClick={e=>e.stopPropagation()}>{str}</a>
     }
 
     // Bool / Number highlighting
-    if (typeof value === 'boolean') return <span className="text-purple-600 font-bold">{str}</span>;
+    if (typeof value === 'boolean') return <span className="text-orange-600 font-bold">{str}</span>;
     if (typeof value === 'number') return <span className="text-blue-600">{str}</span>;
 
-    return <span className="truncate block" title={str}>{str}</span>;
+    // 普通文本
+    return <span className="truncate block max-w-md" title={str}>{str}</span>;
 }
 
 
 const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
-  // 基础 URL
   const serviceRoot = useMemo(() => {
     return metadataUrl.replace(/\/\$metadata$/, '').replace(/\/$/, '');
   }, [metadataUrl]);
@@ -298,13 +407,12 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
   const [skip, setSkip] = useState<number | ''>('');
   const [count, setCount] = useState(false);
   
-  // Format & View State
-  const [reqFormat, setReqFormat] = useState<'json' | 'xml'>('json');
-  const [viewMode, setViewMode] = useState<'code' | 'table'>('code');
+  // Tab State
+  const [activeTab, setActiveTab] = useState<TabType>('json');
   
   // Result State
-  const [resultData, setResultData] = useState<any>(null); // JSON 对象
-  const [resultText, setResultText] = useState<string>(''); // XML 文本
+  const [resultData, setResultData] = useState<any>(null); // JSON Data
+  const [resultXml, setResultXml] = useState<string>(''); // XML String
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -336,7 +444,7 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     setTop('');
     setSkip('');
     setResultData(null);
-    setResultText('');
+    setResultXml('');
     setError(null);
     setDrillStack([]);
   }, [selectedSet]);
@@ -389,17 +497,19 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     updater(newSet);
   };
 
-  const executeQuery = async () => {
+  // 执行查询
+  const executeQuery = async (forceFormat?: 'json' | 'xml') => {
     if (!generatedUrl) return;
     setLoading(true);
     setError(null);
-    setResultData(null);
-    setResultText('');
     setDrillStack([]);
+
+    // 决定请求格式: 如果是 Table 或 JSON 页签 -> JSON; 如果是 XML 页签 -> XML
+    const targetFormat = forceFormat || (activeTab === 'xml' ? 'xml' : 'json');
 
     try {
       const headers: any = {};
-      if (reqFormat === 'xml') {
+      if (targetFormat === 'xml') {
           headers['Accept'] = 'application/atom+xml, application/xml, text/xml';
       } else {
           headers['Accept'] = 'application/json, application/json;odata.metadata=minimal';
@@ -410,22 +520,24 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
       
       const text = await res.text();
       
-      if (reqFormat === 'json') {
+      if (targetFormat === 'json') {
           try {
               const json = JSON.parse(text);
               setResultData(json);
+              setResultXml(''); // 清除旧的 XML
           } catch (e) {
-              setResultText(text);
-              // 如果返回了 XML，自动切到 XML 模式
+              // 失败降级
               if (text.trim().startsWith('<')) {
-                  setReqFormat('xml');
-                  throw new Error("服务器返回了 XML 数据，已自动切换到文本视图。");
-              } else {
-                  throw new Error("无法解析 JSON 响应: " + text.substring(0, 50));
+                  setResultXml(text);
+                  setResultData(null);
+                  setActiveTab('xml');
+                  throw new Error("Server returned XML instead of JSON. Switched to XML view.");
               }
+              throw new Error("Failed to parse JSON response.");
           }
       } else {
-          setResultText(text);
+          setResultXml(text);
+          setResultData(null); // 清除旧的 JSON
       }
     } catch (e: any) {
       setError(e.message);
@@ -434,13 +546,18 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     }
   };
 
-  // 格式切换时自动查询
-  useEffect(() => {
-      if (isMounted.current && generatedUrl) {
-          executeQuery();
+  // 处理页签切换
+  const handleTabChange = (newTab: TabType) => {
+      setActiveTab(newTab);
+      // 如果切换到 XML 且没有 XML 数据，强制刷新
+      if (newTab === 'xml' && !resultXml) {
+          executeQuery('xml');
       }
-      isMounted.current = true;
-  }, [reqFormat]);
+      // 如果切换到 JSON/Table 且没有 JSON 数据，强制刷新
+      if ((newTab === 'json' || newTab === 'table') && !resultData) {
+          executeQuery('json');
+      }
+  };
 
   const handleDrillDown = (key: string, data: any) => {
       setDrillStack(prev => [...prev, { title: key, data }]);
@@ -460,11 +577,9 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
 
   // Table Data 计算
   const currentTableData = useMemo(() => {
-      // 1. 如果有 DrillDown 栈，显示栈顶数据
       if (drillStack.length > 0) {
           return normalizeODataResponse(drillStack[drillStack.length - 1].data);
       }
-      // 2. 否则显示主结果
       if (resultData) {
           return normalizeODataResponse(resultData);
       }
@@ -651,54 +766,34 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
               </code>
            </div>
 
-           {/* Toolbar */}
+           {/* Toolbar (Tabs & Action) */}
            <div className="flex items-end justify-between gap-4">
-                <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">返回格式</label>
-                    <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                        <button 
-                            onClick={() => { setReqFormat('json'); setViewMode('code'); }} 
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${reqFormat === 'json' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <FileJson className="w-3.5 h-3.5" /> JSON
-                        </button>
-                        <button 
-                            onClick={() => { setReqFormat('xml'); }}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${reqFormat === 'xml' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <FileCode className="w-3.5 h-3.5" /> XML
-                        </button>
-                    </div>
+                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                    <button 
+                        onClick={() => handleTabChange('json')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeTab === 'json' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <FileJson className="w-3.5 h-3.5" /> JSON
+                    </button>
+                    <button 
+                        onClick={() => handleTabChange('table')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeTab === 'table' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <TableIcon className="w-3.5 h-3.5" /> Table
+                    </button>
+                    <button 
+                        onClick={() => handleTabChange('xml')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeTab === 'xml' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <FileCode className="w-3.5 h-3.5" /> XML
+                    </button>
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* View Switcher (Only visible for JSON) */}
-                    {reqFormat === 'json' && (
-                        <div className="flex flex-col gap-1 items-end">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">视图模式</label>
-                            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                                <button 
-                                    onClick={() => setViewMode('code')} 
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'code' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <Code className="w-3.5 h-3.5" /> 代码
-                                </button>
-                                <button 
-                                    onClick={() => setViewMode('table')}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'table' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <TableIcon className="w-3.5 h-3.5" /> 表格
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="h-8 w-px bg-slate-200 mx-1"></div>
-
                     <button 
-                        onClick={executeQuery} 
+                        onClick={() => executeQuery()} 
                         disabled={loading || !generatedUrl}
-                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-md text-sm font-bold transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:translate-y-px"
+                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-md text-sm font-bold transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:translate-y-px"
                     >
                         {loading ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -720,67 +815,67 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
              </div>
            )}
 
-           {!error && !resultData && !resultText && !loading && (
+           {!error && !resultData && !resultXml && !loading && (
              <div className="h-full flex flex-col items-center justify-center text-slate-300 select-none">
                 <Play className="w-16 h-16 mb-4 opacity-10" />
                 <p className="text-sm font-medium">点击 "Run Query" 获取数据</p>
              </div>
            )}
 
-           {(resultData || resultText) && (
-               <div className="flex-1 overflow-auto h-full w-full">
-                    {reqFormat === 'json' ? (
-                        viewMode === 'code' ? (
-                            <div className="h-full w-full overflow-auto bg-white">
-                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 text-xs font-bold text-slate-500 flex justify-between sticky top-0 z-10 shadow-sm">
-                                    <span>JSON Response</span>
-                                    {/* Fix: Check resultData before access */}
-                                    {resultData && resultData['@odata.count'] && <span className="text-indigo-600">Total Count: {resultData['@odata.count']}</span>}
-                                </div>
-                                <div className="p-4">
-                                     <JsonNode value={resultData} />
-                                </div>
+           {(resultData || resultXml) && (
+               <div className="flex-1 overflow-auto h-full w-full bg-white relative">
+                   {/* JSON View */}
+                   {activeTab === 'json' && resultData && (
+                       <div className="h-full w-full overflow-auto">
+                            <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 text-xs font-bold text-slate-500 flex justify-between sticky top-0 z-10 shadow-sm">
+                                <span>JSON Tree</span>
+                                {resultData['@odata.count'] && <span className="text-indigo-600">Total: {resultData['@odata.count']}</span>}
                             </div>
-                        ) : (
-                            // Table View with Drill Down
-                            <div className="flex flex-col h-full w-full bg-white">
-                                {drillStack.length > 0 && (
-                                    <div className="flex items-center gap-2 p-2 bg-indigo-50 border-b border-indigo-100 text-xs overflow-x-auto whitespace-nowrap sticky top-0 z-20">
-                                        <button onClick={() => handleDrillUp(-1)} className="hover:bg-indigo-100 p-1 rounded text-indigo-700 font-bold flex items-center gap-1">
-                                            <ArrowLeft className="w-3 h-3" /> Root
-                                        </button>
-                                        {drillStack.map((item, idx) => (
-                                            <React.Fragment key={idx}>
-                                                <ChevronRight className="w-3 h-3 text-indigo-300" />
-                                                <button 
-                                                    onClick={() => handleDrillUp(idx)}
-                                                    className={`p-1 rounded hover:bg-indigo-100 transition ${idx === drillStack.length - 1 ? 'font-bold text-indigo-800' : 'text-indigo-600'}`}
-                                                >
-                                                    {item.title}
-                                                </button>
-                                            </React.Fragment>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className="flex-1 overflow-auto">
-                                    <DataTable 
-                                        data={currentTableData} 
-                                        onDrillDown={handleDrillDown} 
-                                    />
-                                </div>
+                            <div className="p-4">
+                                <JsonNode value={resultData} />
                             </div>
-                        )
-                    ) : (
-                        // XML View
-                        <div className="h-full w-full overflow-auto bg-white">
+                       </div>
+                   )}
+
+                   {/* Table View */}
+                   {activeTab === 'table' && resultData && (
+                       <div className="flex flex-col h-full w-full">
+                            {drillStack.length > 0 && (
+                                <div className="flex items-center gap-2 p-2 bg-indigo-50 border-b border-indigo-100 text-xs overflow-x-auto whitespace-nowrap sticky top-0 z-20 shadow-sm">
+                                    <button onClick={() => handleDrillUp(-1)} className="hover:bg-indigo-100 p-1.5 rounded text-indigo-700 font-bold flex items-center gap-1 transition-colors">
+                                        <ArrowLeft className="w-3.5 h-3.5" /> Root
+                                    </button>
+                                    {drillStack.map((item, idx) => (
+                                        <React.Fragment key={idx}>
+                                            <ChevronRight className="w-3 h-3 text-indigo-300" />
+                                            <button 
+                                                onClick={() => handleDrillUp(idx)}
+                                                className={`px-2 py-1 rounded transition-colors ${idx === drillStack.length - 1 ? 'bg-white shadow-sm font-bold text-indigo-800' : 'hover:bg-indigo-100 text-indigo-600'}`}
+                                            >
+                                                {item.title}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex-1 overflow-auto">
+                                <DataTable 
+                                    data={currentTableData} 
+                                    onDrillDown={handleDrillDown} 
+                                />
+                            </div>
+                       </div>
+                   )}
+
+                   {/* XML View */}
+                   {activeTab === 'xml' && resultXml && (
+                        <div className="h-full w-full overflow-auto">
                             <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 text-xs font-bold text-slate-500 sticky top-0 z-10 shadow-sm">
-                                <span>XML / Atom Response</span>
+                                <span>XML Tree</span>
                             </div>
-                            <pre className="p-4 text-xs font-mono text-slate-700 w-full whitespace-pre-wrap break-all leading-normal">
-                                {formatXml(resultText)}
-                            </pre>
+                            <XmlViewer xmlString={resultXml} />
                         </div>
-                    )}
+                   )}
                </div>
            )}
         </div>
