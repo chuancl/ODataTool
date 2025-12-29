@@ -3,29 +3,32 @@ import { Graph, Path } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 import { DagreLayout } from '@antv/layout';
 import { Scroller } from '@antv/x6-plugin-scroller';
-import '@antv/x6-plugin-scroller/es/index.css'; // 引入 Scroller 样式
+import '@antv/x6-plugin-scroller/es/index.css';
 import { ODataSchema, ODataEntity } from '../types';
 import EntityNode from './EntityNode';
 
 // 注册自定义 React 节点
 register({
   shape: 'entity-node',
-  width: 240, 
-  height: 300, // 初始高度，后续会根据内容动态调整
+  width: 280, // 加宽节点
+  height: 200, // 初始高度，仅占位
   effect: ['data'],
   component: EntityNode,
 });
 
-// 自定义连线连接器 - 跳线风格（可选，暂时用 rounded）
+// 自定义连线连接器 - 使用 Jumpover (跳线) 风格，减少交叉混乱
 Graph.registerConnector(
-  'rounded',
+  'jumpover',
   (sourcePoint, targetPoint, routePoints, options) => {
     const path = new Path();
     path.appendSegment(Path.createSegment('M', sourcePoint));
+    // 简单的跳线逻辑通常由 X6 内置的 jumpover 算法处理，
+    // 这里我们实际上会直接调用内置的 connector: 'jumpover'，
+    // 下面的自定义仅作为 fallback 或特殊需求保留。
+    // 为了美观，我们主要依赖配置中的 name: 'jumpover'
+    
     if (routePoints && routePoints.length) {
-      routePoints.forEach((p) => {
-        path.appendSegment(Path.createSegment('L', p));
-      });
+       routePoints.forEach(p => path.appendSegment(Path.createSegment('L', p)));
     }
     path.appendSegment(Path.createSegment('L', targetPoint));
     return path.serialize();
@@ -37,16 +40,33 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
+// 估算节点高度，用于布局计算
 const estimateHeight = (entity: ODataEntity) => {
-    // Header 40
-    // PKs * 30
-    // Props * 28 (max 10) + footer
-    // Navs * 28
-    const pkH = entity.keys.length * 30;
-    const otherProps = entity.properties.filter(p => !entity.keys.includes(p.name));
-    const propH = Math.min(otherProps.length, 10) * 28 + (otherProps.length > 10 ? 20 : 0);
-    const navH = entity.navigationProperties.length * 28;
-    return 40 + pkH + propH + navH + 20 + 20; // + padding
+    const HEADER_HEIGHT = 44;
+    const ROW_HEIGHT = 28;
+    const PK_HEIGHT = 34;
+    const FOOTER_PADDING = 10;
+    const RELATION_HEADER = 24;
+
+    const pkCount = entity.keys.length;
+    const propCount = entity.properties.filter(p => !entity.keys.includes(p.name)).length;
+    const navCount = entity.navigationProperties.length;
+
+    // 限制显示的属性数量 (与组件内保持一致)
+    const visibleProps = Math.min(propCount, 8); 
+    const hiddenMsgHeight = propCount > 8 ? 26 : 0;
+
+    let height = HEADER_HEIGHT;
+    height += pkCount * PK_HEIGHT;
+    height += visibleProps * ROW_HEIGHT;
+    height += hiddenMsgHeight;
+
+    if (navCount > 0) {
+        height += RELATION_HEADER;
+        height += navCount * ROW_HEIGHT; 
+    }
+    
+    return height + FOOTER_PADDING;
 };
 
 const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
@@ -69,7 +89,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
         modifiers: ['ctrl', 'meta'],
         factor: 1.1,
         maxScale: 3,
-        minScale: 0.1,
+        minScale: 0.2,
       },
       zooming: {
         enabled: true,
@@ -79,32 +99,34 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
       },
       grid: {
         visible: true,
-        type: 'doubleMesh',
+        type: 'dot', // 改为点状网格，更干净
         args: [
-          { color: '#e2e8f0', thickness: 1 }, // secondary
-          { color: '#cbd5e1', thickness: 1, factor: 4 }, // primary
+          { color: '#cbd5e1', thickness: 1 }, 
         ],
       },
       connecting: {
         router: {
-            name: 'manhattan', // 曼哈顿直角路由
+            name: 'manhattan', // 曼哈顿路由（直角折线）
             args: {
-                offset: 'center',
                 padding: 20, // 避让距离
+                step: 10,
             }
         },
         connector: {
-          name: 'rounded',
+          name: 'jumpover', // 关键：跳线风格
           args: {
-            radius: 8,
+            radius: 4,
+            size: 4, // 跳跃弧度大小
           },
         },
         anchor: 'center',
-        connectionPoint: 'boundary', // 连接到包围盒边界
+        connectionPoint: 'boundary',
         allowBlank: false,
+        highlight: true,
       },
       interaction: {
         nodeMovable: true,
+        edgeMovable: false, // 禁止拖动连线
       }
     });
 
@@ -114,6 +136,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
             pannable: true,
             pageVisible: false,
             pageBreak: false,
+            className: 'custom-scroller',
         }),
     );
 
@@ -136,7 +159,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
         nodes.push({
             id: entity.name,
             shape: 'entity-node',
-            width: 260,
+            width: 280, // 宽度稍微增加
             height: estimateHeight(entity),
             data: { entity },
         });
@@ -158,71 +181,92 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
             }
 
             if (targetId && entityMap.has(targetId)) {
-                const edgeColor = isCollection ? '#3b82f6' : '#10b981'; // 蓝 / 绿
+                // 连线颜色：更低调的灰色，避免抢眼
+                const edgeColor = isCollection ? '#94a3b8' : '#94a3b8'; 
                 
                 edges.push({
                     id: `${entity.name}-${nav.name}-${targetId}`,
                     source: { 
                         cell: entity.name, 
-                        // 关键：尝试连接到具体的导航属性行
-                        selector: `[id="nav-${nav.name}"]`
+                        selector: `[id="nav-${nav.name}"]`, // 尝试连接到具体的导航行
+                        anchor: {
+                            name: 'right', // 强制从右侧出线，配合 Manhatten 路由
+                            args: { dy: 0 }
+                        },
+                        connectionPoint: 'anchor',
                     },
-                    target: targetId,
-                    zIndex: isCollection ? 10 : 1,
+                    target: {
+                        cell: targetId,
+                        anchor: 'left', // 强制从左侧入线
+                        connectionPoint: 'boundary',
+                    },
+                    zIndex: 0,
                     attrs: {
                         line: {
                             stroke: edgeColor,
-                            strokeWidth: isCollection ? 2 : 1.5,
+                            strokeWidth: 1.5,
                             targetMarker: {
-                                name: 'block',
-                                width: 8,
-                                height: 8,
-                                offset: 0, 
+                                name: isCollection ? 'crow' : 'block', // 1:N 用鸦脚，1:1 用箭头
+                                width: 6,
+                                height: 6,
+                                offset: 0,
+                                fill: edgeColor,
                             },
                         },
                     },
-                    labels: [
-                        {
-                            attrs: {
-                                label: {
-                                    text: isCollection ? '1..N' : '1..1',
-                                    fill: edgeColor,
-                                    fontSize: 10,
-                                    fontWeight: 'bold',
-                                },
-                                body: {
-                                    fill: '#ffffff',
-                                    stroke: edgeColor,
-                                    strokeWidth: 1,
-                                    rx: 4,
-                                    ry: 4,
-                                    refWidth: '140%',
-                                    refHeight: '130%',
-                                    refX: '-20%',
-                                    refY: '-15%',
-                                }
+                    // 仅在 hover 时显示标签，减少视觉噪音
+                    defaultLabel: {
+                        markup: [
+                            {
+                                tagName: 'rect',
+                                selector: 'body',
                             },
-                            position: 0.5, // 标签在中间
-                        }
-                    ]
+                            {
+                                tagName: 'text',
+                                selector: 'label',
+                            },
+                        ],
+                        attrs: {
+                            label: {
+                                fill: '#64748b',
+                                fontSize: 10,
+                                textAnchor: 'middle',
+                                textVerticalAnchor: 'middle',
+                                pointerEvents: 'none',
+                            },
+                            body: {
+                                ref: 'label',
+                                fill: '#f1f5f9',
+                                stroke: '#cbd5e1',
+                                strokeWidth: 1,
+                                rx: 4,
+                                ry: 4,
+                                refWidth: '120%',
+                                refHeight: '120%',
+                                refX: '-10%',
+                                refY: '-10%',
+                            },
+                        },
+                    },
                 });
             }
         });
     });
 
-    // 3. 计算布局 (Dagre)
+    // 3. 计算布局 (Dagre) - 关键修改
     const dagreLayout = new DagreLayout({
         type: 'dagre',
-        rankdir: 'LR',
+        rankdir: 'TB', // 改为 Top-to-Bottom，这样孤立节点会横向铺开
         align: 'UL',
-        ranksep: 100, // 层级间距
-        nodesep: 60,  // 节点垂直间距
+        ranksep: 80,   // 增加层级间距
+        nodesep: 100,  // 增加同层节点间距 (防止挤在一起)
         controlPoints: true,
+        ranker: 'tight-tree', // 尝试更紧凑的树形算法
     });
 
     const model = dagreLayout.layout({
         nodes: nodes,
-        edges: edges.map(e => ({ source: e.source.cell || e.source, target: e.target, id: e.id })), 
+        edges: edges.map(e => ({ source: e.source.cell || e.source, target: e.target.cell || e.target, id: e.id })), 
     });
 
     // 应用布局坐标
@@ -240,8 +284,26 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
     // 5. 自动适配
     setTimeout(() => {
         graph.centerContent();
-        graph.zoomToFit({ padding: 40, maxScale: 1.5 });
+        graph.zoomToFit({ padding: 60, maxScale: 1.2 }); // 稍微留白多一点
     }, 100);
+
+    // 6. 事件监听：高亮相关连线
+    graph.on('node:mouseenter', ({ node }) => {
+        const connectedEdges = graph.getConnectedEdges(node);
+        connectedEdges.forEach(edge => {
+            edge.attr('line/stroke', '#6366f1'); // Indigo-500
+            edge.attr('line/strokeWidth', 2);
+            edge.toFront();
+        });
+    });
+
+    graph.on('node:mouseleave', ({ node }) => {
+        const connectedEdges = graph.getConnectedEdges(node);
+        connectedEdges.forEach(edge => {
+            edge.attr('line/stroke', '#94a3b8');
+            edge.attr('line/strokeWidth', 1.5);
+        });
+    });
 
     return () => {
       graph.dispose();
@@ -249,29 +311,34 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
   }, [schema]);
 
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative group">
         <div ref={containerRef} className="w-full h-full" />
         
         {/* 控制面板 */}
-        <div className="absolute top-4 right-4 flex gap-2 bg-white/90 p-1.5 rounded-lg shadow-md border border-slate-200 backdrop-blur-sm z-10">
-            <button 
-                onClick={() => graphRef.current?.zoomToFit({ padding: 40, maxScale: 1.5 })}
-                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
-            >
-                Fit
-            </button>
-            <button 
-                onClick={() => graphRef.current?.zoom(0.1)}
-                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
-            >
-                +
-            </button>
-            <button 
-                onClick={() => graphRef.current?.zoom(-0.1)}
-                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
-            >
-                -
-            </button>
+        <div className="absolute top-6 right-6 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+             <div className="flex gap-1 bg-white p-1 rounded-lg shadow-lg border border-slate-100">
+                <button 
+                    onClick={() => graphRef.current?.zoomToFit({ padding: 40, maxScale: 1.2 })}
+                    className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition"
+                    title="Fit to Screen"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                </button>
+                <button 
+                    onClick={() => graphRef.current?.zoom(0.1)}
+                    className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition"
+                    title="Zoom In"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </button>
+                <button 
+                    onClick={() => graphRef.current?.zoom(-0.1)}
+                    className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition"
+                    title="Zoom Out"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </button>
+            </div>
         </div>
     </div>
   );
