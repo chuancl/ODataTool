@@ -1,120 +1,133 @@
-import React, { useMemo, useState } from 'react';
-import { ODataEntity, ODataSchema } from '../types';
+import React, { useMemo, useCallback } from 'react';
+import ReactFlow, {
+  Background,
+  Controls,
+  useNodesState,
+  useEdgesState,
+  MarkerType,
+  Node,
+  Edge,
+  ConnectionLineType
+} from 'reactflow';
+import dagre from 'dagre';
+import { ODataSchema } from '../types';
+import EntityNode from './EntityNode';
+
+// 注册自定义节点类型
+const nodeTypes = {
+  entity: EntityNode,
+};
 
 interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// 简单的 SVG ER 图组件
+// 布局计算函数
+const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+  // 设置布局方向和间距
+  dagreGraph.setGraph({ 
+    rankdir: 'LR', // 'TB' (Top to Bottom) or 'LR' (Left to Right)
+    nodesep: 50,   // 节点间距
+    ranksep: 150   // 层级间距
+  });
+
+  // 设置节点尺寸供 Dagre 计算 (这里取一个平均估计值，因为此时 DOM 还没渲染)
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: 240, height: 300 });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  nodes.forEach((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    // Dagre 返回中心点，React Flow 需要左上角
+    node.position = {
+      x: nodeWithPosition.x - 240 / 2,
+      y: nodeWithPosition.y - 300 / 2,
+    };
+  });
+
+  return { nodes, edges };
+};
+
 const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
-  const [zoom, setZoom] = useState(1);
   
-  // 1. 计算布局 (圆形布局算法)
-  const { nodes, links, width, height } = useMemo(() => {
-    const entities = schema.entities;
-    const count = entities.length;
-    // 动态调整画布大小
-    const radius = Math.max(300, count * 35); 
-    const cx = radius + 200;
-    const cy = radius + 100;
-    const w = cx * 2;
-    const h = cy * 2;
+  // 1. 数据转换：将 OData Schema 转换为 React Flow 的 Nodes 和 Edges
+  const { initialNodes, initialEdges } = useMemo(() => {
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
 
-    const nodePositions = entities.map((entity, i) => {
-      const angle = (i / count) * 2 * Math.PI;
-      const x = cx + radius * Math.cos(angle);
-      const y = cy + radius * Math.sin(angle);
-      return { entity, x, y, id: entity.name };
-    });
+    schema.entities.forEach((entity) => {
+      // 创建节点
+      nodes.push({
+        id: entity.name,
+        type: 'entity',
+        data: { entity },
+        position: { x: 0, y: 0 }, // 初始位置，稍后由 dagre 计算
+      });
 
-    const links: any[] = [];
-    nodePositions.forEach(sourceNode => {
-      sourceNode.entity.navigationProperties.forEach(nav => {
-        // 解析目标类型，例如 "Collection(NorthwindModel.Product)" -> "Product"
-        // 或者 "NorthwindModel.Category" -> "Category"
+      // 创建连线 (Edges)
+      entity.navigationProperties.forEach((nav) => {
+        // 解析目标类型
         let targetName = nav.type;
-        if (targetName.startsWith('Collection(')) {
+        const isCollection = targetName.startsWith('Collection(');
+        if (isCollection) {
             targetName = targetName.substring(11, targetName.length - 1);
         }
         targetName = targetName.split('.').pop() || targetName;
 
-        const targetNode = nodePositions.find(n => n.entity.name === targetName);
+        // 确保目标实体存在于当前 Schema 中
+        const targetExists = schema.entities.some(e => e.name === targetName);
         
-        if (targetNode) {
-          links.push({
-            source: sourceNode,
-            target: targetNode,
-            name: nav.name
-          });
+        if (targetExists) {
+            edges.push({
+                id: `${entity.name}-${nav.name}-${targetName}`,
+                source: entity.name,
+                target: targetName,
+                type: 'step', // 正交连线
+                label: isCollection ? '1..N' : '1..1', // 简单的基数标记
+                labelStyle: { fill: '#0284c7', fontWeight: 700, fontSize: 10 },
+                labelBgStyle: { fill: '#f0f9ff' },
+                style: { stroke: '#0ea5e9', strokeWidth: 1.5 },
+                markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    color: '#0ea5e9',
+                },
+                animated: false,
+            });
         }
       });
     });
 
-    return { nodes: nodePositions, links, width: w, height: h };
+    return getLayoutedElements(nodes, edges);
   }, [schema]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
   return (
-    <div className="w-full h-full overflow-auto bg-slate-50 relative cursor-grab active:cursor-grabbing">
-      <div className="absolute top-4 right-4 flex gap-2 z-10">
-          <button onClick={() => setZoom(z => Math.max(0.2, z - 0.1))} className="bg-white border border-slate-300 p-2 rounded shadow text-slate-600 hover:bg-slate-50">-</button>
-          <span className="bg-white border border-slate-300 px-3 py-2 rounded shadow text-slate-600 min-w-[3rem] text-center">{(zoom * 100).toFixed(0)}%</span>
-          <button onClick={() => setZoom(z => Math.min(3, z + 0.1))} className="bg-white border border-slate-300 p-2 rounded shadow text-slate-600 hover:bg-slate-50">+</button>
-      </div>
-
-      <div style={{ width: width * zoom, height: height * zoom, transformOrigin: '0 0', transform: `scale(${zoom})` }}>
-      <svg width={width} height={height} className="block">
-        <defs>
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="28" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#cbd5e1" />
-          </marker>
-        </defs>
-
-        {/* 连线 */}
-        {links.map((link, i) => {
-            // 计算简单的贝塞尔曲线
-            const dx = link.target.x - link.source.x;
-            const dy = link.target.y - link.source.y;
-            const midX = (link.source.x + link.target.x) / 2;
-            const midY = (link.source.y + link.target.y) / 2;
-            // 稍微弯曲
-            const offset = 50; 
-            
-            return (
-                <g key={i}>
-                    <path 
-                        // 这里为了简单，使用直线，优化可以使用 Q 指令做曲线
-                        d={`M${link.source.x},${link.source.y} L${link.target.x},${link.target.y}`}
-                        stroke="#cbd5e1" 
-                        strokeWidth="1.5"
-                        fill="none"
-                        markerEnd="url(#arrowhead)"
-                    />
-                     {/* 关系名 */}
-                     <text x={midX} y={midY} textAnchor="middle" fill="#94a3b8" fontSize="10" className="bg-white">{link.name}</text>
-                </g>
-            );
-        })}
-
-        {/* 节点 (实体) */}
-        {nodes.map((node, i) => (
-          <g key={i} transform={`translate(${node.x},${node.y})`}>
-            {/* 阴影 */}
-            <rect x="-80" y="-30" width="160" height="60" rx="8" fill="#000" fillOpacity="0.05" transform="translate(4,4)" />
-            {/* 卡片背景 */}
-            <rect x="-80" y="-30" width="160" height="60" rx="8" fill="white" stroke={node.entity.keys.length > 0 ? '#6366f1' : '#cbd5e1'} strokeWidth="2" />
-            
-            {/* 实体名 */}
-            <text x="0" y="-5" textAnchor="middle" fontWeight="bold" fill="#334155" fontSize="14" style={{ pointerEvents: 'none' }}>
-                {node.entity.name}
-            </text>
-            {/* 属性计数 */}
-            <text x="0" y="15" textAnchor="middle" fill="#64748b" fontSize="10" style={{ pointerEvents: 'none' }}>
-                {node.entity.properties.length} Props · {node.entity.navigationProperties.length} Rels
-            </text>
-          </g>
-        ))}
-      </svg>
-      </div>
+    <div className="w-full h-full bg-slate-50">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        connectionLineType={ConnectionLineType.Step}
+        fitView
+        attributionPosition="bottom-right"
+        minZoom={0.1}
+      >
+        <Background color="#cbd5e1" gap={20} size={1} />
+        <Controls />
+      </ReactFlow>
     </div>
   );
 };
