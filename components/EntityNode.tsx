@@ -7,6 +7,13 @@ interface EntityNodeProps {
   entity?: ODataEntity;
 }
 
+// 这里的样式高度必须与 ERDiagram.tsx 中的计算逻辑保持严格一致
+// Header: 42px
+// PK Row: 32px
+// Prop Row: 28px
+// Nav Header: 28px
+// Nav Row: 28px
+
 const EntityNode: React.FC<EntityNodeProps> = ({ node, entity: propEntity }) => {
   const entity: ODataEntity = node ? node.getData()?.entity : propEntity;
 
@@ -15,34 +22,28 @@ const EntityNode: React.FC<EntityNodeProps> = ({ node, entity: propEntity }) => 
   const keyProperties = entity.properties.filter(p => entity.keys.includes(p.name));
   const otherProperties = entity.properties.filter(p => !entity.keys.includes(p.name));
   
-  // 限制显示数量，避免节点过长
+  // 限制显示数量
   const MAX_VISIBLE_PROPS = 8;
   const visibleProps = otherProperties.slice(0, MAX_VISIBLE_PROPS);
   const hiddenCount = otherProperties.length - MAX_VISIBLE_PROPS;
 
   return (
-    <div className="w-full h-full font-sans text-sm bg-white rounded-lg shadow-lg border border-slate-200 flex flex-col overflow-hidden hover:shadow-xl hover:ring-2 hover:ring-indigo-400/50 transition-all duration-300 group">
+    <div className="w-full h-full font-sans text-sm bg-white rounded-lg shadow-md border border-slate-300 flex flex-col overflow-hidden hover:shadow-xl hover:border-indigo-400 transition-all duration-300 group">
       
-      {/* 头部：深色渐变背景 */}
+      {/* 1. Header: 固定高度 42px */}
       <div 
-        className="bg-gradient-to-r from-slate-800 to-slate-700 p-2.5 flex justify-between items-center text-white cursor-move relative overflow-hidden"
+        className="h-[42px] bg-slate-100 border-b border-slate-200 px-3 flex justify-between items-center relative overflow-hidden shrink-0"
       >
-          {/* 装饰性光泽 */}
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-white/10"></div>
-          
-          <div className="flex items-center gap-2.5 overflow-hidden z-10">
-              <div className="p-1 bg-white/10 rounded-md shadow-inner backdrop-blur-sm">
-                <Table2 className="w-3.5 h-3.5 text-indigo-200" />
-              </div>
-              <span className="font-semibold tracking-wide truncate text-[13px] text-shadow-sm" title={entity.name}>
+          <div className="flex items-center gap-2 overflow-hidden z-10">
+              <Table2 className="w-4 h-4 text-slate-500" />
+              <span className="font-bold text-slate-700 truncate text-[13px]" title={entity.name}>
                 {entity.name}
               </span>
           </div>
           
           {entity.navigationProperties.length > 0 && (
-              <div className="flex items-center gap-1 bg-slate-900/50 px-2 py-0.5 rounded-full border border-white/5 backdrop-blur-md">
-                  <Braces className="w-2.5 h-2.5 text-emerald-400" />
-                  <span className="text-[10px] text-emerald-100 font-mono font-bold">
+              <div className="flex items-center justify-center bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-sm">
+                  <span className="text-[10px] text-slate-500 font-mono font-bold">
                       {entity.navigationProperties.length}
                   </span>
               </div>
@@ -50,67 +51,66 @@ const EntityNode: React.FC<EntityNodeProps> = ({ node, entity: propEntity }) => 
       </div>
 
       {/* 内容区域 */}
-      <div className="flex-1 bg-slate-50 flex flex-col min-h-0">
+      <div className="flex-1 bg-white flex flex-col min-h-0">
           
-          {/* 主键区域 (PK) */}
+          {/* 2. 主键区域 (PK): 每行 32px */}
           {keyProperties.length > 0 && (
             <div className="bg-white border-b border-slate-100">
             {keyProperties.map((prop) => (
-                <div key={prop.name} className="flex items-center justify-between px-3 py-2 bg-amber-50/40 border-l-[3px] border-amber-400 hover:bg-amber-50 transition-colors">
+                <div key={prop.name} className="h-[32px] flex items-center justify-between px-3 bg-amber-50/50 border-l-[3px] border-amber-400">
                     <div className="flex items-center gap-2 overflow-hidden">
-                        <Key className="w-3 h-3 flex-shrink-0 text-amber-500 fill-amber-500/20" />
-                        <span className="font-medium text-slate-800 truncate text-xs">{prop.name}</span>
+                        <Key className="w-3 h-3 flex-shrink-0 text-amber-500" />
+                        <span className="font-semibold text-slate-800 truncate text-xs">{prop.name}</span>
                     </div>
-                    <span className="text-[9px] text-amber-600/80 font-mono bg-amber-100/50 px-1 rounded ml-2">PK</span>
+                    <span className="text-[9px] text-amber-600 font-mono">PK</span>
                 </div>
             ))}
             </div>
           )}
 
-          {/* 普通属性列表 */}
+          {/* 3. 普通属性列表: 每行 28px */}
           <div className="flex-col">
             {visibleProps.map((prop, index) => (
             <div 
                 key={prop.name} 
-                className={`flex items-center justify-between px-3 py-1.5 border-l-[3px] border-transparent hover:border-slate-300 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}
+                className={`h-[28px] flex items-center justify-between px-3 border-l-[3px] border-transparent ${index % 2 === 1 ? 'bg-slate-50' : 'bg-white'}`}
             >
                 <div className="flex items-center gap-2 overflow-hidden mr-2">
-                    <Hash className="w-2.5 h-2.5 text-slate-300 flex-shrink-0" />
                     <span className="truncate text-slate-600 text-xs" title={prop.name}>{prop.name}</span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono flex-shrink-0 bg-slate-100 px-1 rounded max-w-[80px] truncate" title={prop.type}>
+                <span className="text-[10px] text-slate-400 font-mono flex-shrink-0 truncate max-w-[80px]" title={prop.type}>
                     {prop.type.split('.').pop()}
                 </span>
             </div>
             ))}
             
+            {/* More Row: 28px */}
             {hiddenCount > 0 && (
-                <div className="px-3 py-1.5 text-center bg-slate-100/50 border-t border-slate-100">
-                    <span className="text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1">
-                        + {hiddenCount} more properties
+                <div className="h-[28px] flex items-center justify-center bg-slate-50 border-t border-slate-100">
+                    <span className="text-[10px] text-slate-400 italic">
+                        ... {hiddenCount} more properties
                     </span>
                 </div>
             )}
           </div>
 
-          {/* 导航属性 (Foreign Keys / Relations) */}
+          {/* 4. 导航属性区域 */}
           {entity.navigationProperties.length > 0 && (
             <div className="mt-auto border-t border-slate-200 bg-white">
-                <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                    <Braces className="w-2.5 h-2.5" /> Relations
+                {/* 导航标题: 28px */}
+                <div className="h-[28px] px-3 bg-slate-50 border-b border-slate-100 flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Navigation</span>
                 </div>
-                <div className="max-h-[120px] overflow-y-auto custom-scrollbar">
+                
+                {/* 导航行: 每行 28px */}
+                <div className="">
                     {entity.navigationProperties.map((nav) => {
                         const isCollection = nav.type.includes('Collection(');
-                        // 生成唯一 ID，确保连线能找到这一行
-                        const rowId = `nav-${entity.name}-${nav.name}`;
-                        
                         return (
                         <div 
                             key={nav.name} 
-                            magnet="true"
-                            id={rowId}
-                            className="group/nav relative flex items-center justify-between px-3 py-1.5 hover:bg-indigo-50 cursor-pointer transition-colors border-l-[3px] border-transparent hover:border-indigo-400"
+                            // 移除 ID，完全依赖端口
+                            className="h-[28px] group/nav relative flex items-center justify-between px-3 hover:bg-indigo-50 transition-colors border-l-[3px] border-transparent hover:border-indigo-400"
                         >
                             <div className="flex items-center gap-2 truncate">
                                 <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isCollection ? 'bg-blue-400' : 'bg-emerald-400'}`}></div>
@@ -118,10 +118,8 @@ const EntityNode: React.FC<EntityNodeProps> = ({ node, entity: propEntity }) => 
                                     {nav.name}
                                 </span>
                             </div>
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded-sm font-mono border ${
-                                isCollection 
-                                ? 'bg-blue-50 text-blue-600 border-blue-100' 
-                                : 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                            <span className={`text-[9px] px-1 rounded-sm font-mono ${
+                                isCollection ? 'text-blue-500' : 'text-emerald-500'
                             }`}>
                                 {isCollection ? '1:N' : '1:1'}
                             </span>
