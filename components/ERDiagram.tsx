@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useCallback } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -12,7 +12,6 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel
 } from 'reactflow';
-// 安全导入 dagre
 import * as dagre from 'dagre';
 import { ODataSchema } from '../types';
 import EntityNode from './EntityNode';
@@ -25,173 +24,196 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// 辅助函数：安全获取 Dagre Graph 实例
+// --- 布局算法区域 ---
+
+// 1. 获取 Dagre 实例 (兼容处理)
 const getDagreGraph = () => {
-    // 兼容不同的打包方式 (CommonJS vs ESM)
-    // @ts-ignore
-    if (dagre.graphlib) return new dagre.graphlib.Graph();
-    // @ts-ignore
-    if (dagre.default && dagre.default.graphlib) return new dagre.default.graphlib.Graph();
-    // 如果都不行，尝试直接 new dagre
     try {
+        // @ts-ignore
+        if (dagre.graphlib) return new dagre.graphlib.Graph();
+        // @ts-ignore
+        if (dagre.default && dagre.default.graphlib) return new dagre.default.graphlib.Graph();
         // @ts-ignore
         return new dagre.Graph(); 
     } catch(e) {
-        console.warn("Cannot instantiate Dagre graph", e);
+        console.warn("Dagre load failed, fallback to grid layout.", e);
         return null;
     }
 };
 
-const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
+// 2. 智能布局 (Dagre)
+const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   const dagreGraph = getDagreGraph();
-  
-  if (!dagreGraph) {
-      console.error("Dagre library not loaded correctly.");
-      return { nodes, edges };
-  }
+  if (!dagreGraph) return null; // 失败则返回 null，触发兜底
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 100, ranksep: 300 });
 
-  dagreGraph.setGraph({ 
-    rankdir: 'LR', 
-    nodesep: 80,   
-    ranksep: 280   
-  });
-
+  // 必须确保所有节点都在 graph 中
   nodes.forEach((node) => {
-    // 预估节点大小
-    dagreGraph.setNode(node.id, { width: 280, height: 300 });
+    dagreGraph.setNode(node.id, { width: 280, height: 300 }); // 估算节点尺寸
   });
 
-  edges.forEach((edge) => {
+  // 必须过滤掉悬空的 edge (即 source 或 target 不在 nodes 里的)
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const validEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+  validEdges.forEach((edge) => {
     dagreGraph.setEdge(edge.source, edge.target);
   });
 
   try {
-      dagre.layout(dagreGraph);
-  } catch (e) {
-      // 兼容 dagre.layout 可能位于 default 属性的情况
-      if ((dagre as any).default?.layout) {
+      // @ts-ignore
+      if (dagre.layout) {
+          // @ts-ignore
+          dagre.layout(dagreGraph);
+      } else if ((dagre as any).default?.layout) {
           (dagre as any).default.layout(dagreGraph);
       } else {
-          console.error("Layout failed", e);
-          // 降级布局
-          return { 
-             nodes: nodes.map((n, i) => ({ ...n, position: { x: (i % 4) * 320, y: Math.floor(i / 4) * 400 } })), 
-             edges 
-          };
+          return null;
       }
+  } catch (e) {
+      console.error("Dagre layout calculation failed", e);
+      return null;
   }
 
-  const layoutedNodes = nodes.map((node) => {
+  return nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    // 如果某个节点被孤立导致没计算位置，保持原位
     if (!nodeWithPosition) return node;
-
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - 140, 
+        x: nodeWithPosition.x - 140,
         y: nodeWithPosition.y - 150,
       },
       targetPosition: 'left',
       sourcePosition: 'right',
     };
   });
-
-  return { nodes: layoutedNodes, edges };
 };
+
+// 3. 简易网格布局 (兜底方案)
+const getGridLayout = (nodes: Node[]) => {
+    const COLUMNS = 4;
+    const X_SPACING = 350;
+    const Y_SPACING = 450;
+    
+    return nodes.map((node, index) => ({
+        ...node,
+        position: {
+            x: (index % COLUMNS) * X_SPACING,
+            y: Math.floor(index / COLUMNS) * Y_SPACING
+        },
+        targetPosition: 'left',
+        sourcePosition: 'right',
+    }));
+};
+
 
 const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     const { fitView } = useReactFlow();
     
-    const { initialNodes, initialEdges } = useMemo(() => {
+    // 初始化状态 (先为空)
+    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+    // 核心数据处理逻辑
+    useEffect(() => {
         if (!schema || !schema.entities || schema.entities.length === 0) {
-            return { initialNodes: [], initialEdges: [] };
+            setNodes([]);
+            setEdges([]);
+            return;
         }
 
-        const nodes: Node[] = [];
-        const edges: Edge[] = [];
-        const entityNames = new Set(schema.entities.map(e => e.name));
+        const rawNodes: Node[] = [];
+        const rawEdges: Edge[] = [];
+        
+        // 1. 构建节点 ID 映射表，用于处理命名空间 (Namespace.Entity -> Entity)
+        const entityMap = new Map<string, string>(); // FullName/ShortName -> ID
+        schema.entities.forEach(e => {
+            entityMap.set(e.name, e.name); // Order -> Order
+            if (schema.namespace) {
+                entityMap.set(`${schema.namespace}.${e.name}`, e.name); // Northwind.Order -> Order
+            }
+        });
 
+        // 2. 生成基础节点
         schema.entities.forEach((entity) => {
-            nodes.push({
+            rawNodes.push({
                 id: entity.name,
                 type: 'entity',
                 data: { entity },
-                position: { x: 0, y: 0 },
-                draggable: true,
-                connectable: false, 
+                position: { x: 0, y: 0 }, // 初始位置
             });
+        });
 
+        // 3. 生成连线
+        schema.entities.forEach((entity) => {
             entity.navigationProperties.forEach((nav) => {
-                let targetName = nav.type;
-                const isCollection = targetName.startsWith('Collection(');
+                // 解析目标类型：Collection(NorthwindModel.Order) -> NorthwindModel.Order
+                let rawTargetType = nav.type;
+                const isCollection = rawTargetType.startsWith('Collection(');
                 if (isCollection) {
-                    targetName = targetName.substring(11, targetName.length - 1);
+                    rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
                 }
+
+                // 尝试匹配目标 ID
+                let targetId = entityMap.get(rawTargetType);
                 
-                let actualTarget = '';
-                if (entityNames.has(targetName)) {
-                    actualTarget = targetName;
-                } else {
-                    const shortName = targetName.split('.').pop() || '';
-                    if (entityNames.has(shortName)) {
-                        actualTarget = shortName;
+                // 如果没匹配到，尝试去掉命名空间再匹配一次
+                if (!targetId) {
+                    const shortName = rawTargetType.split('.').pop();
+                    if (shortName && entityMap.has(shortName)) {
+                        targetId = entityMap.get(shortName);
                     }
                 }
 
-                if (actualTarget && actualTarget !== entity.name) {
-                    const edgeId = `${entity.name}-${nav.name}-${actualTarget}`;
-                    edges.push({
+                // 只有当目标节点存在，且不是自引用(可选)时，才创建连线
+                if (targetId && entityMap.has(targetId)) {
+                    const edgeId = `${entity.name}-${nav.name}-${targetId}`;
+                    rawEdges.push({
                         id: edgeId,
                         source: entity.name,
-                        target: actualTarget,
-                        type: 'smoothstep', 
+                        target: targetId,
+                        type: 'smoothstep', // 直角连线更整洁
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#0ea5e9', fontWeight: 700, fontSize: 10 },
-                        labelBgStyle: { fill: '#f0f9ff', fillOpacity: 0.9, rx: 4, ry: 4 },
-                        style: { stroke: '#0ea5e9', strokeWidth: 1.5 },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
+                        labelStyle: { fill: '#3b82f6', fontWeight: 700, fontSize: 10 },
+                        labelBgStyle: { fill: '#eff6ff', fillOpacity: 0.9 },
+                        style: { stroke: '#3b82f6', strokeWidth: 1.5 },
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
                     });
                 }
             });
         });
 
-        return getLayoutedElements(nodes, edges);
-    }, [schema]);
-
-    const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes || []);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges || []);
-
-    useEffect(() => {
-        if (initialNodes) setNodes(initialNodes);
-        if (initialEdges) setEdges(initialEdges);
+        // 4. 执行布局计算
+        let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
         
-        const t1 = setTimeout(() => {
-            fitView({ padding: 0.2 });
-        }, 50);
-        
-        const t2 = setTimeout(() => {
-            fitView({ padding: 0.2, duration: 500 });
-        }, 500);
+        // 5. 如果智能布局失败，使用网格布局
+        if (!layoutedNodes) {
+            console.warn("Layout fallback triggered");
+            layoutedNodes = getGridLayout(rawNodes);
+        }
 
-        return () => { clearTimeout(t1); clearTimeout(t2); };
-    }, [initialNodes, initialEdges, fitView, setNodes, setEdges]);
+        setNodes(layoutedNodes);
+        setEdges(rawEdges);
 
-    // 安全检查：确保 schema.entities 存在后再访问 length
+        // 6. 强制适配视图
+        setTimeout(() => {
+            window.requestAnimationFrame(() => {
+                fitView({ padding: 0.2, duration: 600 });
+            });
+        }, 100);
+
+    }, [schema, fitView, setNodes, setEdges]);
+
+
+    // 即使没有节点，也不要显示 Loading 阻塞界面，而是显示空状态或者网格
     if (!schema || !schema.entities || schema.entities.length === 0) {
         return (
-            <div className="w-full h-full flex items-center justify-center text-slate-400">
-                <p>No entities found in schema.</p>
-            </div>
-        );
-    }
-
-    // 安全检查：确保 nodes 存在
-    if (!nodes || nodes.length === 0) {
-         return (
-            <div className="w-full h-full flex items-center justify-center text-slate-400">
-                <p>Preparing diagram...</p>
+            <div className="flex items-center justify-center h-full text-slate-400">
+                No entities to display.
             </div>
         );
     }
@@ -205,20 +227,32 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             onEdgesChange={onEdgesChange}
             connectionLineType={ConnectionLineType.SmoothStep}
             fitView
-            minZoom={0.1}
-            maxZoom={4}
+            minZoom={0.05}
+            maxZoom={2}
             defaultEdgeOptions={{ type: 'smoothstep' }}
             proOptions={{ hideAttribution: true }}
-            style={{ width: '100%', height: '100%', background: '#f8fafc' }}
+            className="bg-slate-50"
         >
             <Background color="#cbd5e1" gap={25} size={1} />
             <Controls />
-            <Panel position="top-right">
+            <Panel position="top-right" className="flex gap-2">
+                <button 
+                    onClick={() => {
+                        // 强制重新布局 (网格)
+                        const gridNodes = getGridLayout(nodes);
+                        setNodes(gridNodes);
+                        setTimeout(() => fitView({ duration: 500 }), 50);
+                    }}
+                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
+                    title="Switch to Grid Layout"
+                >
+                    Grid Layout
+                </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
-                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600 transition"
+                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
                 >
-                    Reset View
+                    Fit View
                 </button>
             </Panel>
         </ReactFlow>
@@ -227,7 +261,8 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
 const ERDiagram: React.FC<ERDiagramProps> = (props) => {
     return (
-        <div className="w-full h-full flex-1 relative bg-slate-50">
+        // 确保容器有明确的尺寸，flex-1 和 relative 很重要
+        <div className="w-full h-full flex-1 relative min-h-[500px] bg-slate-50">
             <ReactFlowProvider>
                 <ERDiagramInner {...props} />
             </ReactFlowProvider>
