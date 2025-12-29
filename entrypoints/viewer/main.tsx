@@ -4,8 +4,11 @@ import { browser } from 'wxt/browser';
 import { Box, Layers, ArrowRight, RefreshCw, Code, Database, AlertCircle, LayoutGrid, List } from 'lucide-react';
 import { ViewerState } from '../../types';
 import { parseODataMetadata, inferMetadataUrl } from '../../services/odataService';
-import ERDiagram from '../../components/ERDiagram'; // 引入组件
+import ERDiagram from '../../components/ERDiagram';
 import '../../assets/main.css';
+
+// *** 关键修复：直接从 npm 包引入样式，确保在 Extension 环境中生效 ***
+import '@xyflow/react/dist/style.css'; 
 
 const ODataViewerApp: React.FC = () => {
   const [state, setState] = useState<ViewerState>({
@@ -13,7 +16,7 @@ const ODataViewerApp: React.FC = () => {
     isLoading: true
   });
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'details' | 'er'>('details');
+  const [viewMode, setViewMode] = useState<'details' | 'er'>('details'); // 默认视图
 
   useEffect(() => {
     init();
@@ -24,8 +27,7 @@ const ODataViewerApp: React.FC = () => {
     const sourceType = params.get('sourceType') as any || 'url';
     let url = params.get('url') || '';
     
-    if (url && !url.startsWith('http')) { }
-
+    // 稍微延迟 loading 状态，避免闪烁
     setState(prev => ({ ...prev, sourceType, url, isLoading: true }));
 
     try {
@@ -38,9 +40,11 @@ const ODataViewerApp: React.FC = () => {
       } else if (sourceType === 'url' && url) {
         let fetchUrl = url;
         
+        // 尝试智能推断 $metadata
         if (!url.toLowerCase().includes('$metadata')) {
              const metadataUrl = inferMetadataUrl(url);
              try {
+                 // 快速预检
                  const res = await fetch(metadataUrl);
                  if (res.ok) {
                      const text = await res.text();
@@ -74,6 +78,8 @@ const ODataViewerApp: React.FC = () => {
   const parseAndSet = (content: string) => {
       try {
         const schema = parseODataMetadata(content);
+        // 如果解析成功，默认切换到 ER 图视图，展示成果
+        setViewMode('er'); 
         setState(prev => ({ ...prev, isLoading: false, schema, content, error: undefined }));
       } catch (e: any) {
           setState(prev => ({ ...prev, isLoading: false, error: `解析失败: ${e.message}。` }));
@@ -85,35 +91,35 @@ const ODataViewerApp: React.FC = () => {
   return (
     <div className="flex flex-col h-screen text-slate-800 bg-slate-50 font-sans">
       {/* 顶部栏 */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 h-16 shrink-0">
+      <header className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between shadow-sm z-10 h-14 shrink-0">
         <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-lg text-white shadow-sm">
-                <Database className="w-5 h-5" />
+            <div className="bg-indigo-600 p-1.5 rounded-md text-white shadow-sm">
+                <Database className="w-4 h-4" />
             </div>
             <div className="overflow-hidden">
-                <h1 className="font-bold text-lg leading-tight text-slate-800">OData Visualizer</h1>
-                <p className="text-xs text-slate-500 truncate max-w-xl font-mono" title={state.url}>
-                    {state.url || '本地文件模式'}
+                <h1 className="font-bold text-base leading-tight text-slate-800">OData Visualizer</h1>
+                <p className="text-[10px] text-slate-500 truncate max-w-xl font-mono opacity-80" title={state.url}>
+                    {state.url || 'Local File'}
                 </p>
             </div>
         </div>
 
         {/* 视图切换 Tabs */}
         {!state.isLoading && !state.error && (
-            <div className="bg-slate-100 p-1 rounded-lg flex items-center">
+            <div className="bg-slate-100 p-0.5 rounded-md flex items-center border border-slate-200">
                 <button 
                     onClick={() => setViewMode('details')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${viewMode === 'details' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-xs font-medium transition ${viewMode === 'details' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                    <List className="w-4 h-4" />
-                    Details
+                    <List className="w-3.5 h-3.5" />
+                    List
                 </button>
                 <button 
                     onClick={() => setViewMode('er')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${viewMode === 'er' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-xs font-medium transition ${viewMode === 'er' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                    <LayoutGrid className="w-4 h-4" />
-                    ER Diagram
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    Diagram
                 </button>
             </div>
         )}
@@ -121,9 +127,10 @@ const ODataViewerApp: React.FC = () => {
         <div className="flex gap-2">
             <button 
                 onClick={() => window.location.reload()} 
-                className="p-2 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-full transition"
+                className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-full transition"
+                title="Reload"
             >
-                <RefreshCw className="w-5 h-5" />
+                <RefreshCw className="w-4 h-4" />
             </button>
         </div>
       </header>
@@ -132,24 +139,21 @@ const ODataViewerApp: React.FC = () => {
       <div className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
         
         {state.isLoading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-50/90 z-20">
-                <div className="relative">
-                    <div className="w-12 h-12 border-4 border-slate-200 rounded-full"></div>
-                    <div className="w-12 h-12 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin absolute top-0 left-0"></div>
-                </div>
-                <p className="mt-4 font-medium">Loading schema...</p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-50 z-20">
+                <div className="w-8 h-8 border-4 border-indigo-200 rounded-full border-t-indigo-600 animate-spin"></div>
+                <p className="mt-4 font-medium text-sm">Parsing metadata...</p>
             </div>
         )}
 
         {state.error && (
              <div className="w-full h-full flex flex-col items-center justify-center p-8 overflow-y-auto">
-                <div className="bg-white p-8 rounded-2xl shadow-xl border border-red-100 max-w-lg w-full text-center">
-                    <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <AlertCircle className="w-8 h-8" />
+                <div className="bg-white p-8 rounded-xl shadow-lg border border-red-100 max-w-lg w-full text-center">
+                    <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <AlertCircle className="w-6 h-6" />
                     </div>
-                    <h2 className="font-bold text-xl text-slate-800 mb-2">Error</h2>
+                    <h2 className="font-bold text-lg text-slate-800 mb-2">Error Occurred</h2>
                     <p className="text-slate-600 mb-6 text-sm whitespace-pre-line">{state.error}</p>
-                    <button onClick={() => window.history.back()} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg">Return</button>
+                    <button onClick={() => window.location.reload()} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded text-sm font-medium">Try Again</button>
                 </div>
             </div>
         )}
@@ -158,107 +162,104 @@ const ODataViewerApp: React.FC = () => {
             <>
                 {viewMode === 'details' ? (
                     <div className="flex w-full h-full overflow-hidden">
-                        <div className="w-72 bg-white border-r border-slate-200 overflow-y-auto flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-0 flex-shrink-0">
-                             <div className="p-4 border-b border-slate-100 bg-slate-50/50 sticky top-0 backdrop-blur-sm z-10">
-                                <h2 className="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                                    <span>Entity Sets</span>
-                                    <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">{state.schema.entities.length}</span>
+                        {/* 左侧列表 */}
+                        <div className="w-64 bg-white border-r border-slate-200 overflow-y-auto flex flex-col z-0 flex-shrink-0">
+                             <div className="p-3 border-b border-slate-100 bg-slate-50/80 sticky top-0 backdrop-blur-sm z-10">
+                                <h2 className="font-bold text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                                    <span>Entities</span>
+                                    <span className="bg-slate-200 text-slate-600 px-1.5 rounded-full">{state.schema.entities.length}</span>
                                 </h2>
                             </div>
-                            <ul className="flex-1 py-2 space-y-0.5 px-2">
+                            <ul className="flex-1 py-1">
                                 {state.schema.entities.map((entity, idx) => (
                                     <li key={idx}>
                                         <button
                                             onClick={() => setSelectedEntity(entity.name)}
-                                            className={`w-full text-left px-3 py-2.5 flex items-center gap-3 rounded-lg transition-all duration-200 group ${
+                                            className={`w-full text-left px-4 py-2 flex items-center gap-2 transition-colors border-l-2 ${
                                                 selectedEntity === entity.name 
-                                                ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-200' 
-                                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                                                ? 'bg-indigo-50 border-indigo-600 text-indigo-700' 
+                                                : 'border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                                             }`}
                                         >
-                                            <Box className={`w-4 h-4 flex-shrink-0 ${selectedEntity === entity.name ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`} />
-                                            <span className="text-sm font-medium truncate">
-                                                {entity.name}
-                                            </span>
+                                            <span className="text-xs font-medium truncate">{entity.name}</span>
                                         </button>
                                     </li>
                                 ))}
                             </ul>
                         </div>
 
-                        <div className="flex-1 bg-slate-50/80 overflow-y-auto p-6 lg:p-10">
+                        {/* 详情内容 */}
+                        <div className="flex-1 bg-white overflow-y-auto p-8">
                             {currentEntity ? (
-                                <div className="max-w-5xl mx-auto space-y-6">
-                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                                <div className="max-w-4xl mx-auto space-y-8">
+                                    <div className="flex items-start justify-between border-b border-slate-100 pb-4">
                                         <div>
-                                            <h2 className="text-3xl font-bold text-slate-800 tracking-tight mb-1">{currentEntity.name}</h2>
-                                            <p className="text-slate-500 text-sm">Namespace: {state.schema.namespace}</p>
+                                            <h2 className="text-2xl font-bold text-slate-800">{currentEntity.name}</h2>
+                                            <p className="text-slate-400 text-xs mt-1 font-mono">{state.schema.namespace}.{currentEntity.name}</p>
                                         </div>
-                                         <div className="flex flex-wrap gap-1.5">
+                                         <div className="flex flex-wrap gap-2">
                                             {currentEntity.keys.map(k => (
-                                                <span key={k} className="bg-amber-100 text-amber-800 text-xs px-2.5 py-1 rounded-md border border-amber-200 font-mono flex items-center gap-1">
-                                                    🔑 {k}
+                                                <span key={k} className="bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-100 font-mono flex items-center gap-1">
+                                                    Key: {k}
                                                 </span>
                                             ))}
                                          </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
-                                            <div className="px-6 py-4 border-b bg-slate-50 flex items-center gap-2 font-bold text-slate-700">
-                                                <Code className="w-4 h-4" /> Properties
-                                            </div>
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-sm text-left">
-                                                     <thead className="bg-slate-50 text-slate-500 border-b">
-                                                        <tr>
-                                                            <th className="px-6 py-3">Name</th>
-                                                            <th className="px-6 py-3">Type</th>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <Code className="w-4 h-4 text-slate-400" /> Properties
+                                            </h3>
+                                            <table className="w-full text-xs text-left border-collapse">
+                                                <thead className="bg-slate-50 text-slate-500">
+                                                    <tr>
+                                                        <th className="px-3 py-2 border border-slate-200 font-semibold">Name</th>
+                                                        <th className="px-3 py-2 border border-slate-200 font-semibold">Type</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {currentEntity.properties.map((p, i) => (
+                                                        <tr key={i} className="hover:bg-slate-50/50">
+                                                            <td className="px-3 py-2 border border-slate-100 font-mono text-slate-700">
+                                                                {p.name} {currentEntity.keys.includes(p.name) && '🔑'}
+                                                            </td>
+                                                            <td className="px-3 py-2 border border-slate-100 text-slate-500">{p.type}</td>
                                                         </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-100">
-                                                        {currentEntity.properties.map((p, i) => (
-                                                            <tr key={i} className="hover:bg-slate-50">
-                                                                <td className="px-6 py-3 font-mono text-slate-700">
-                                                                    {p.name} {currentEntity.keys.includes(p.name) && '🔑'}
-                                                                </td>
-                                                                <td className="px-6 py-3 text-slate-500 text-xs">{p.type}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                                    ))}
+                                                </tbody>
+                                            </table>
                                         </div>
                                         
-                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden h-fit">
-                                            <div className="px-6 py-4 border-b bg-slate-50 flex items-center gap-2 font-bold text-slate-700">
-                                                <Layers className="w-4 h-4" /> Navigation
-                                            </div>
-                                            <div className="divide-y divide-slate-100">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <Layers className="w-4 h-4 text-slate-400" /> Navigation
+                                            </h3>
+                                            <div className="border border-slate-200 rounded-md overflow-hidden">
                                                 {currentEntity.navigationProperties.map((nav, i) => (
-                                                    <div key={i} className="px-6 py-3 flex justify-between items-center hover:bg-slate-50">
-                                                        <span className="font-mono text-indigo-700 font-medium text-sm">{nav.name}</span>
-                                                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                    <div key={i} className="px-3 py-2 flex justify-between items-center hover:bg-slate-50 border-b border-slate-100 last:border-0 text-xs">
+                                                        <span className="font-medium text-indigo-700">{nav.name}</span>
+                                                        <div className="flex items-center gap-1 text-slate-400">
                                                             <ArrowRight className="w-3 h-3" />
-                                                            <span className="bg-slate-100 px-2 py-1 rounded border">{nav.type}</span>
+                                                            <span className="font-mono">{nav.type}</span>
                                                         </div>
                                                     </div>
                                                 ))}
-                                                {currentEntity.navigationProperties.length === 0 && <div className="p-4 text-center text-slate-400 text-sm">None</div>}
+                                                {currentEntity.navigationProperties.length === 0 && <div className="p-3 text-center text-slate-400 text-xs italic">No relationships</div>}
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                    <Box className="w-12 h-12 text-indigo-200 mb-4" />
-                                    <p>Select an entity to view details</p>
+                                    <p>Select an entity from the list</p>
                                 </div>
                             )}
                         </div>
                     </div>
                 ) : (
-                    <div className="w-full h-full bg-slate-100 flex-1 relative">
+                    // ER Diagram 视图
+                    <div className="w-full h-full bg-slate-50 relative overflow-hidden">
                         <ERDiagram schema={state.schema} />
                     </div>
                 )}

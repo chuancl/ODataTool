@@ -2,8 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 引入 React Flow 样式 */
-@import 'https://cdn.jsdelivr.net/npm/@xyflow/react/dist/style.css';
+/* 
+   注意：React Flow 样式已移至 main.tsx 中通过 import 引入
+   以避免 Chrome 扩展的内容安全策略 (CSP) 拦截 CDN 资源 
+*/
 
 body {
   margin: 0;
@@ -14,29 +16,25 @@ body {
   overflow: hidden;
 }
 
-/* React Flow 自定义样式覆盖 */
+/* 覆盖默认样式，使其更贴近原生表格 */
 .react-flow__node {
   border: none !important;
   background: transparent !important;
   width: auto !important;
+  cursor: default !important;
 }
 
-.react-flow__handle {
-  width: 6px;
-  height: 6px;
-  background: #64748b;
-  border: 1px solid white;
+.react-flow__edge-path {
+  stroke: #64748b;
+  stroke-width: 1px;
 }
 
-.react-flow__handle-left {
-  left: -3px;
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #4f46e5; /* indigo-600 */
+  stroke-width: 2px;
 }
 
-.react-flow__handle-right {
-  right: -3px;
-}
-
-/* 隐藏 attribution */
+/* 隐藏 React Flow 的版权信息 */
 .react-flow__attribution {
   display: none;
 }
