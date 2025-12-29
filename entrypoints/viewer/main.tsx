@@ -13,7 +13,7 @@ const ODataViewerApp: React.FC = () => {
     isLoading: true
   });
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'details' | 'er'>('details'); // 新增视图模式
+  const [viewMode, setViewMode] = useState<'details' | 'er'>('details');
 
   useEffect(() => {
     init();
@@ -129,7 +129,7 @@ const ODataViewerApp: React.FC = () => {
       </header>
 
       {/* 主体内容 */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
         
         {state.isLoading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-50/90 z-20">
@@ -157,8 +157,7 @@ const ODataViewerApp: React.FC = () => {
         {!state.isLoading && !state.error && state.schema && (
             <>
                 {viewMode === 'details' ? (
-                    /* 详情视图 (原有的左右分栏) */
-                    <>
+                    <div className="flex w-full h-full overflow-hidden">
                         <div className="w-72 bg-white border-r border-slate-200 overflow-y-auto flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-0 flex-shrink-0">
                              <div className="p-4 border-b border-slate-100 bg-slate-50/50 sticky top-0 backdrop-blur-sm z-10">
                                 <h2 className="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center justify-between">
@@ -205,7 +204,6 @@ const ODataViewerApp: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                        {/* 属性表格 */}
                                         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
                                             <div className="px-6 py-4 border-b bg-slate-50 flex items-center gap-2 font-bold text-slate-700">
                                                 <Code className="w-4 h-4" /> Properties
@@ -232,7 +230,6 @@ const ODataViewerApp: React.FC = () => {
                                             </div>
                                         </div>
                                         
-                                        {/* 导航属性 */}
                                         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden h-fit">
                                             <div className="px-6 py-4 border-b bg-slate-50 flex items-center gap-2 font-bold text-slate-700">
                                                 <Layers className="w-4 h-4" /> Navigation
@@ -259,10 +256,11 @@ const ODataViewerApp: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                    </>
+                    </div>
                 ) : (
-                    /* ER 图视图 */
-                    <ERDiagram schema={state.schema} />
+                    <div className="w-full h-full bg-slate-100 flex-1 relative">
+                        <ERDiagram schema={state.schema} />
+                    </div>
                 )}
             </>
         )}

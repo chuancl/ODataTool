@@ -12,12 +12,11 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel
 } from 'reactflow';
-import dagre from 'dagre';
+// 安全导入 dagre
+import * as dagre from 'dagre';
 import { ODataSchema } from '../types';
 import EntityNode from './EntityNode';
 
-// 注册自定义节点类型
-// 必须在组件外部定义，或者使用 useMemo，否则会导致无限重渲染
 const nodeTypes = {
   entity: EntityNode,
 };
@@ -26,63 +25,89 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// 布局计算函数
+// 辅助函数：安全获取 Dagre Graph 实例
+const getDagreGraph = () => {
+    // 兼容不同的打包方式 (CommonJS vs ESM)
+    // @ts-ignore
+    if (dagre.graphlib) return new dagre.graphlib.Graph();
+    // @ts-ignore
+    if (dagre.default && dagre.default.graphlib) return new dagre.default.graphlib.Graph();
+    // 如果都不行，尝试直接 new dagre
+    try {
+        // @ts-ignore
+        return new dagre.Graph(); 
+    } catch(e) {
+        console.warn("Cannot instantiate Dagre graph", e);
+        return null;
+    }
+};
+
 const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
-  try {
-      const dagreGraph = new dagre.graphlib.Graph();
-      dagreGraph.setDefaultEdgeLabel(() => ({}));
-
-      // 设置布局方向和间距
-      dagreGraph.setGraph({ 
-        rankdir: 'LR', 
-        nodesep: 80,   
-        ranksep: 250   
-      });
-
-      // 设置节点尺寸供 Dagre 计算
-      nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, { width: 260, height: 300 });
-      });
-
-      edges.forEach((edge) => {
-        dagreGraph.setEdge(edge.source, edge.target);
-      });
-
-      dagre.layout(dagreGraph);
-
-      const layoutedNodes = nodes.map((node) => {
-        const nodeWithPosition = dagreGraph.node(node.id);
-        // 如果 dagre 计算失败，使用默认位置
-        if (!nodeWithPosition) return node;
-
-        return {
-          ...node,
-          position: {
-            x: nodeWithPosition.x - 130, // center offset
-            y: nodeWithPosition.y - 150,
-          },
-          targetPosition: 'left',
-          sourcePosition: 'right',
-        };
-      });
-
-      return { nodes: layoutedNodes, edges };
-  } catch (err) {
-      console.error("Dagre Layout Error:", err);
-      // 降级：如果布局失败，简单的网格排列或直接返回
-      return { 
-          nodes: nodes.map((n, i) => ({ ...n, position: { x: (i % 5) * 300, y: Math.floor(i / 5) * 350 } })), 
-          edges 
-      };
+  const dagreGraph = getDagreGraph();
+  
+  if (!dagreGraph) {
+      console.error("Dagre library not loaded correctly.");
+      return { nodes, edges };
   }
+
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+  dagreGraph.setGraph({ 
+    rankdir: 'LR', 
+    nodesep: 80,   
+    ranksep: 280   
+  });
+
+  nodes.forEach((node) => {
+    // 预估节点大小
+    dagreGraph.setNode(node.id, { width: 280, height: 300 });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  try {
+      dagre.layout(dagreGraph);
+  } catch (e) {
+      // 兼容 dagre.layout 可能位于 default 属性的情况
+      if ((dagre as any).default?.layout) {
+          (dagre as any).default.layout(dagreGraph);
+      } else {
+          console.error("Layout failed", e);
+          // 降级布局
+          return { 
+             nodes: nodes.map((n, i) => ({ ...n, position: { x: (i % 4) * 320, y: Math.floor(i / 4) * 400 } })), 
+             edges 
+          };
+      }
+  }
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    if (!nodeWithPosition) return node;
+
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - 140, 
+        y: nodeWithPosition.y - 150,
+      },
+      targetPosition: 'left',
+      sourcePosition: 'right',
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
 };
 
 const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
     const { fitView } = useReactFlow();
     
-    // 1. 数据转换：将 OData Schema 转换为 React Flow 的 Nodes 和 Edges
     const { initialNodes, initialEdges } = useMemo(() => {
-        if (!schema || !schema.entities) return { initialNodes: [], initialEdges: [] };
+        if (!schema || !schema.entities || schema.entities.length === 0) {
+            return { initialNodes: [], initialEdges: [] };
+        }
 
         const nodes: Node[] = [];
         const edges: Edge[] = [];
@@ -94,7 +119,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 type: 'entity',
                 data: { entity },
                 position: { x: 0, y: 0 },
-                // 确保节点可拖拽但不可连接（由我们控制连线）
                 draggable: true,
                 connectable: false, 
             });
@@ -106,7 +130,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     targetName = targetName.substring(11, targetName.length - 1);
                 }
                 
-                // 简单的名称匹配逻辑
                 let actualTarget = '';
                 if (entityNames.has(targetName)) {
                     actualTarget = targetName;
@@ -117,8 +140,9 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                     }
                 }
 
-                if (actualTarget) {
+                if (actualTarget && actualTarget !== entity.name) { // 避免自引用过于混乱，或者可以保留
                     const edgeId = `${entity.name}-${nav.name}-${actualTarget}`;
+                    // 检查是否已存在反向边，如果存在，可能重叠，这里暂不处理复杂情况
                     edges.push({
                         id: edgeId,
                         source: entity.name,
@@ -126,10 +150,9 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                         type: 'smoothstep', 
                         label: isCollection ? '1..N' : '1..1',
                         labelStyle: { fill: '#0ea5e9', fontWeight: 700, fontSize: 10 },
-                        labelBgStyle: { fill: '#f0f9ff', fillOpacity: 0.8, rx: 4, ry: 4 },
+                        labelBgStyle: { fill: '#f0f9ff', fillOpacity: 0.9, rx: 4, ry: 4 },
                         style: { stroke: '#0ea5e9', strokeWidth: 1.5 },
                         markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
-                        animated: false,
                     });
                 }
             });
@@ -138,22 +161,40 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
         return getLayoutedElements(nodes, edges);
     }, [schema]);
 
-    // 使用 useNodesState 管理状态，但必须手动同步 schema 变化
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-    // 当 schema (initialNodes) 变化时，更新 React Flow 状态
     useEffect(() => {
         setNodes(initialNodes);
         setEdges(initialEdges);
         
-        // 延迟 fitView 确保节点已渲染
-        setTimeout(() => {
-            window.requestAnimationFrame(() => {
-                fitView({ padding: 0.2, duration: 800 });
-            });
-        }, 100);
-    }, [initialNodes, initialEdges, setNodes, setEdges, fitView]);
+        // 双重延时确保渲染
+        const t1 = setTimeout(() => {
+            fitView({ padding: 0.2 });
+        }, 50);
+        
+        const t2 = setTimeout(() => {
+            fitView({ padding: 0.2, duration: 500 });
+        }, 500);
+
+        return () => { clearTimeout(t1); clearTimeout(t2); };
+    }, [initialNodes, initialEdges, fitView, setNodes, setEdges]);
+
+    if (!schema || schema.entities.length === 0) {
+        return (
+            <div className="w-full h-full flex items-center justify-center text-slate-400">
+                <p>No entities found in schema.</p>
+            </div>
+        );
+    }
+
+    if (nodes.length === 0) {
+         return (
+            <div className="w-full h-full flex items-center justify-center text-slate-400">
+                <p>Preparing diagram...</p>
+            </div>
+        );
+    }
 
     return (
         <ReactFlow
@@ -168,15 +209,14 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             maxZoom={4}
             defaultEdgeOptions={{ type: 'smoothstep' }}
             proOptions={{ hideAttribution: true }}
-            className="w-full h-full bg-slate-50"
-            style={{ width: '100%', height: '100%' }}
+            style={{ width: '100%', height: '100%', background: '#f8fafc' }}
         >
             <Background color="#cbd5e1" gap={25} size={1} />
             <Controls />
             <Panel position="top-right">
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
-                    className="bg-white p-2 rounded shadow text-xs font-bold text-slate-600 hover:text-indigo-600"
+                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600 transition"
                 >
                     Reset View
                 </button>
@@ -187,7 +227,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
 const ERDiagram: React.FC<ERDiagramProps> = (props) => {
     return (
-        <div className="w-full h-full bg-slate-50 flex-1 relative" style={{ minHeight: '400px' }}>
+        <div className="w-full h-full flex-1 relative bg-slate-50">
             <ReactFlowProvider>
                 <ERDiagramInner {...props} />
             </ReactFlowProvider>
