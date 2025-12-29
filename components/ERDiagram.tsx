@@ -42,10 +42,11 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   if (!dagreGraph) return null;
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 300 });
+  // 调整 rankdir 为 LR (从左到右)，减少间距让布局更紧凑自然
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 80, ranksep: 200 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 300, height: 350 }); 
+    dagreGraph.setNode(node.id, { width: 250, height: 300 }); 
   });
 
   const nodeIds = new Set(nodes.map(n => n.id));
@@ -75,26 +76,24 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - 150,
-        y: nodeWithPosition.y - 175,
+        x: nodeWithPosition.x - 125,
+        y: nodeWithPosition.y - 150,
       },
-      // 重要：移除固定的 position，让 React Flow 自动根据 handle 计算最近路径
-      // targetPosition: 'left',
-      // sourcePosition: 'right',
     };
   });
 };
 
 const getGridLayout = (nodes: Node[]) => {
-    const COLUMNS = 4;
-    const X_SPACING = 380;
-    const Y_SPACING = 500;
+    // 增加一点随机性，避免过于死板的网格
+    const COLUMNS = 5;
+    const X_SPACING = 320;
+    const Y_SPACING = 400;
     
     return nodes.map((node, index) => ({
         ...node,
         position: {
-            x: (index % COLUMNS) * X_SPACING,
-            y: Math.floor(index / COLUMNS) * Y_SPACING
+            x: (index % COLUMNS) * X_SPACING + Math.random() * 50,
+            y: Math.floor(index / COLUMNS) * Y_SPACING + Math.random() * 50
         },
     }));
 };
@@ -130,7 +129,6 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                 type: 'entity',
                 data: { entity },
                 position: { x: 0, y: 0 }, 
-                // 启用这些属性让用户可以拖动整理
                 draggable: true,
             });
         });
@@ -153,26 +151,26 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
                 if (targetId && entityMap.has(targetId)) {
                     const edgeId = `${entity.name}-${nav.name}-${targetId}`;
+                    // 确保不指定 sourceHandle 和 targetHandle，让 React Flow 使用 EntityNode 中的默认 Handle
                     rawEdges.push({
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
-                        // 注意：这里不再指定 sourceHandle 和 targetHandle，
-                        // React Flow 会自动在 entity 上定义的 4 个 handle 中寻找最短路径
                         type: 'smoothstep', 
                         animated: false,
-                        zIndex: 1000, 
+                        zIndex: 10, 
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#2563eb', fontWeight: 900, fontSize: 12 }, // 更亮的蓝色字体
-                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9, rx: 4, ry: 4 },
-                        style: { stroke: '#2563eb', strokeWidth: 2.5 }, // 加粗线条，使用亮蓝
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb' },
+                        labelStyle: { fill: '#3b82f6', fontWeight: 700, fontSize: 10 },
+                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
+                        style: { stroke: '#3b82f6', strokeWidth: 2 },
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
                     });
                 }
             });
         });
 
         let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
+        // 如果 Dagre 布局失败（极少情况），使用带随机性的网格布局
         if (!layoutedNodes) {
             layoutedNodes = getGridLayout(rawNodes);
         }
@@ -182,9 +180,9 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
         setTimeout(() => {
             window.requestAnimationFrame(() => {
-                fitView({ padding: 0.2, duration: 600 });
+                fitView({ padding: 0.1, duration: 800 });
             });
-        }, 100);
+        }, 50);
 
     }, [schema, fitView, setNodes, setEdges]);
 
@@ -206,13 +204,13 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             onEdgesChange={onEdgesChange}
             connectionLineType={ConnectionLineType.SmoothStep}
             fitView
-            minZoom={0.05}
-            maxZoom={2}
+            minZoom={0.1}
+            maxZoom={4}
             defaultEdgeOptions={{ type: 'smoothstep' }}
             proOptions={{ hideAttribution: true }}
             className="bg-slate-50"
         >
-            <Background color="#cbd5e1" gap={25} size={1} />
+            <Background color="#94a3b8" gap={30} size={1} />
             <Controls />
             <Panel position="top-right" className="flex gap-2">
                 <button 
@@ -221,13 +219,13 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                         setNodes(gridNodes);
                         setTimeout(() => fitView({ duration: 500 }), 50);
                     }}
-                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
+                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-blue-600 backdrop-blur-sm"
                 >
-                    Reset Grid
+                    Free Layout
                 </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
-                    className="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 text-xs font-bold text-slate-600 hover:text-indigo-600"
+                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-blue-600 backdrop-blur-sm"
                 >
                     Fit View
                 </button>
@@ -238,7 +236,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
 const ERDiagram: React.FC<ERDiagramProps> = (props) => {
     return (
-        <div className="w-full h-full flex-1 relative min-h-[500px] bg-slate-50">
+        <div className="w-full h-full flex-1 relative min-h-[500px] bg-slate-100">
             <ReactFlowProvider>
                 <ERDiagramInner {...props} />
             </ReactFlowProvider>
