@@ -98,10 +98,37 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch(generatedUrl);
+      // 显式请求 JSON 格式，解决 OData V2/V3 默认返回 XML 的问题
+      const res = await fetch(generatedUrl, {
+          headers: {
+              'Accept': 'application/json, application/json;odata.metadata=minimal, text/plain'
+          }
+      });
+
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const data = await res.json();
-      setResult(data);
+      
+      const contentType = res.headers.get('content-type') || '';
+      
+      // 尝试解析 JSON
+      if (contentType.includes('json')) {
+        const data = await res.json();
+        setResult(data);
+      } else {
+        // 如果服务器返回了非 JSON 格式（比如 XML 或 Text）
+        const text = await res.text();
+        try {
+            // 再次尝试强行 Parse，防止 Header 缺失 application/json 但内容确实是 json
+            const data = JSON.parse(text);
+            setResult(data);
+        } catch (e) {
+             // 如果解析失败，说明确实是 XML 或其他格式
+             // 检查是否是 XML 格式的 OData Feed
+             if (text.trim().startsWith('<')) {
+                 throw new Error(`服务器返回了 XML 格式数据，请检查该服务是否支持 JSON。\n(提示: 某些旧版 OData 服务可能需要添加 $format=json 参数，或不支持 JSON 响应)`);
+             }
+             throw new Error(`Received non-JSON response (${contentType}).\n${text.substring(0, 100)}...`);
+        }
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -307,8 +334,8 @@ const QueryBuilder: React.FC<QueryBuilderProps> = ({ schema, metadataUrl }) => {
         <div className="flex-1 overflow-auto p-4">
            {error ? (
              <div className="p-4 bg-red-50 border border-red-100 rounded-lg text-red-600 text-sm flex items-start gap-2">
-                <div className="mt-0.5"><X className="w-4 h-4" /></div>
-                <div className="whitespace-pre-wrap font-mono">{error}</div>
+                <div className="mt-0.5 flex-shrink-0"><X className="w-4 h-4" /></div>
+                <div className="whitespace-pre-wrap font-mono break-all">{error}</div>
              </div>
            ) : result ? (
              <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
