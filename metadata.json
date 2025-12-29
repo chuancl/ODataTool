@@ -1,0 +1,14 @@
+{
+  "name": "Context-Immersion: English Learning Extension",
+  "description": "A Chrome Extension that replaces Chinese words on webpages with English equivalents based on context using Gemini AI, facilitating immersive language learning.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "requestFramePermissions": []
+}
