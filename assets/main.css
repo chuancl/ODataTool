@@ -1,4 +1,3 @@
-@import 'reactflow/dist/style.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,12 +11,18 @@ body {
   overflow: hidden;
 }
 
-/* React Flow 自定义样式覆盖 */
-.react-flow__edge-path {
-  stroke: #0ea5e9; /* Sky Blue 500 */
-  stroke-width: 2;
+/* AntV X6 Container */
+.x6-graph-scroller {
+  width: 100%;
+  height: 100%;
+  background: #f8fafc; /* slate-50 */
 }
 
-.react-flow__attribution {
-  display: none;
+.x6-node {
+    background: transparent;
+}
+
+/* 消除默认的 focus 轮廓 */
+.x6-node:focus, .x6-edge:focus {
+    outline: none;
 }

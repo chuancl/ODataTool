@@ -1,285 +1,287 @@
-import React, { useEffect, useCallback } from 'react';
-import ReactFlow, {
-  Background,
-  Controls,
-  useNodesState,
-  useEdgesState,
-  MarkerType,
-  Node,
-  Edge,
-  ConnectionLineType,
-  useReactFlow,
-  ReactFlowProvider,
-  Panel
-} from 'reactflow';
-// 引入 ELK 的 bundled 版本以避免 Worker 加载问题
-import ELK from 'elkjs/lib/elk.bundled.js';
+import React, { useEffect, useRef } from 'react';
+import { Graph, Path } from '@antv/x6';
+import { register } from '@antv/x6-react-shape';
+import { DagreLayout } from '@antv/layout';
+import { Scroller } from '@antv/x6-plugin-scroller';
 import { ODataSchema, ODataEntity } from '../types';
 import EntityNode from './EntityNode';
 
-const nodeTypes = {
-  entity: EntityNode,
-};
+// 注册自定义 React 节点
+register({
+  shape: 'entity-node',
+  width: 240, 
+  height: 300, // 初始高度，后续会根据内容动态调整
+  effect: ['data'],
+  component: EntityNode,
+});
 
-// 初始化 ELK 实例
-const elk = new ELK();
+// 自定义连线连接器 - 跳线风格（可选，暂时用 rounded）
+Graph.registerConnector(
+  'rounded',
+  (sourcePoint, targetPoint, routePoints, options) => {
+    const path = new Path();
+    path.appendSegment(Path.createSegment('M', sourcePoint));
+    if (routePoints && routePoints.length) {
+      routePoints.forEach((p) => {
+        path.appendSegment(Path.createSegment('L', p));
+      });
+    }
+    path.appendSegment(Path.createSegment('L', targetPoint));
+    return path.serialize();
+  },
+  true,
+);
 
 interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-/**
- * 估算实体节点的高度，用于布局引擎计算
- * 需要与 EntityNode 组件的渲染逻辑保持一致
- */
-const estimateNodeHeight = (entity: ODataEntity) => {
-    // 标题栏 + padding
-    const headerHeight = 50; 
-    
-    // 主键区域 (每行约 30px)
-    const pkHeight = entity.keys.length * 30;
-    
-    // 普通属性区域 (每行约 28px)，最大高度限制为 160px (css中设置)
+const estimateHeight = (entity: ODataEntity) => {
+    // Header 40
+    // PKs * 30
+    // Props * 28 (max 10) + footer
+    // Navs * 28
+    const pkH = entity.keys.length * 30;
     const otherProps = entity.properties.filter(p => !entity.keys.includes(p.name));
-    const propsHeight = Math.min(otherProps.length * 28, 160);
-    
-    // 导航属性区域 (每行约 28px) + 顶部border
-    const navHeight = entity.navigationProperties.length > 0 
-        ? (entity.navigationProperties.length * 28) + 10 
-        : 0;
-
-    // 底部 padding
-    return headerHeight + pkHeight + propsHeight + navHeight + 20;
+    const propH = Math.min(otherProps.length, 10) * 28 + (otherProps.length > 10 ? 20 : 0);
+    const navH = entity.navigationProperties.length * 28;
+    return 40 + pkH + propH + navH + 20 + 20; // + padding
 };
 
-const getElkLayout = async (nodes: Node[], edges: Edge[]) => {
-    const layoutOptions = {
-        'elk.algorithm': 'layered',
-        'elk.direction': 'RIGHT',
-        'elk.spacing.nodeNode': '60', // 垂直方向节点间距
-        'elk.layered.spacing.nodeNodeBetweenLayers': '220', // 水平方向层级间距，留足空间给连线
-        'elk.edgeRouting': 'ORTHOGONAL', // 正交路由（直角线）
-        'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', // 这种策略通常能产生更平衡的布局
-        'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-        'elk.padding': '[top=50,left=50,bottom=50,right=50]',
-    };
+const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const graphRef = useRef<Graph | null>(null);
 
-    const graph: any = {
-        id: 'root',
-        layoutOptions: layoutOptions,
-        children: nodes.map((node) => ({
-            id: node.id,
-            width: 280, // 节点固定宽度 (与 CSS 对应)
-            height: node.data.height || 300,
-        })),
-        edges: edges.map((edge) => ({
-            id: edge.id,
-            sources: [edge.source],
-            targets: [edge.target],
-        })),
-    };
+  useEffect(() => {
+    if (!containerRef.current || !schema) return;
 
-    try {
-        const layoutedGraph = await elk.layout(graph);
-        
-        const layoutedNodes = nodes.map((node) => {
-            // @ts-ignore
-            const nodeData = layoutedGraph.children?.find((n) => n.id === node.id);
-            if (!nodeData) return node;
-
-            return {
-                ...node,
-                position: {
-                    x: nodeData.x || 0,
-                    y: nodeData.y || 0,
-                },
-                // ELK 可能会微调宽高，但我们主要用它的坐标
-            };
-        });
-        
-        return layoutedNodes;
-    } catch (e) {
-        console.error("ELK Layout failed:", e);
-        return nodes; // 失败时返回原节点，避免崩溃
-    }
-};
-
-
-const getGridLayout = (nodes: Node[]) => {
-    const COLUMNS = 4;
-    const X_SPACING = 400;
-    const Y_SPACING = 500;
-    
-    return nodes.map((node, index) => ({
-        ...node,
-        position: {
-            x: (index % COLUMNS) * X_SPACING,
-            y: Math.floor(index / COLUMNS) * Y_SPACING
+    // 1. 初始化 Graph
+    const graph = new Graph({
+      container: containerRef.current,
+      autoResize: true,
+      panning: {
+        enabled: true,
+        eventTypes: ['leftMouseDown', 'mouseWheel'],
+      },
+      mousewheel: {
+        enabled: true,
+        modifiers: ['ctrl', 'meta'],
+        factor: 1.1,
+        maxScale: 3,
+        minScale: 0.1,
+      },
+      zooming: {
+        enabled: true,
+      },
+      background: {
+        color: '#f8fafc', // slate-50
+      },
+      grid: {
+        visible: true,
+        type: 'doubleMesh',
+        args: [
+          { color: '#e2e8f0', thickness: 1 }, // secondary
+          { color: '#cbd5e1', thickness: 1, factor: 4 }, // primary
+        ],
+      },
+      connecting: {
+        router: {
+            name: 'manhattan', // 曼哈顿直角路由
+            args: {
+                offset: 'center',
+                padding: 20, // 避让距离
+            }
         },
-    }));
-};
+        connector: {
+          name: 'rounded',
+          args: {
+            radius: 8,
+          },
+        },
+        anchor: 'center',
+        connectionPoint: 'boundary', // 连接到包围盒边界
+        allowBlank: false,
+      },
+      interaction: {
+        nodeMovable: true,
+      }
+    });
 
-const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
-    const { fitView } = useReactFlow();
-    const [nodes, setNodes, onNodesChange] = useNodesState([]);
-    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    graph.use(
+        new Scroller({
+            enabled: true,
+            pannable: true,
+            pageVisible: false,
+            pageBreak: false,
+        }),
+    );
 
-    // 核心布局逻辑
-    const computeLayout = useCallback(async (currentNodes: Node[], currentEdges: Edge[], useElk = true) => {
-        if (useElk) {
-            const layouted = await getElkLayout(currentNodes, currentEdges);
-            setNodes(layouted);
-        } else {
-            const gridLayout = getGridLayout(currentNodes);
-            setNodes(gridLayout);
+    graphRef.current = graph;
+
+    // 2. 准备数据
+    const nodes: any[] = [];
+    const edges: any[] = [];
+    const entityMap = new Map<string, string>();
+
+    schema.entities.forEach(e => {
+        entityMap.set(e.name, e.name);
+        if (schema.namespace) {
+            entityMap.set(`${schema.namespace}.${e.name}`, e.name);
         }
-        
-        // 布局完成后适应视图
-        setTimeout(() => {
-            window.requestAnimationFrame(() => {
-                fitView({ padding: 0.1, duration: 800 });
-            });
-        }, 50);
-    }, [fitView, setNodes]);
+    });
 
-    useEffect(() => {
-        if (!schema || !schema.entities || schema.entities.length === 0) {
-            setNodes([]);
-            setEdges([]);
-            return;
-        }
+    // 生成节点
+    schema.entities.forEach((entity) => {
+        nodes.push({
+            id: entity.name,
+            shape: 'entity-node',
+            width: 260,
+            height: estimateHeight(entity),
+            data: { entity },
+            // 定义端口：虽然 React 组件内部已经有 magnet，
+            // 但为了布局引擎识别连接方向，我们最好只定义连线逻辑，端口由组件 DOM 决定
+        });
+    });
 
-        const rawNodes: Node[] = [];
-        const rawEdges: Edge[] = [];
-        const entityMap = new Map<string, string>(); 
-        
-        schema.entities.forEach(e => {
-            entityMap.set(e.name, e.name);
-            if (schema.namespace) {
-                entityMap.set(`${schema.namespace}.${e.name}`, e.name);
+    // 生成连线
+    schema.entities.forEach((entity) => {
+        entity.navigationProperties.forEach((nav) => {
+            let rawTargetType = nav.type;
+            const isCollection = rawTargetType.startsWith('Collection(');
+            if (isCollection) {
+                rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
+            }
+
+            let targetId = entityMap.get(rawTargetType);
+            if (!targetId) {
+                const shortName = rawTargetType.split('.').pop();
+                if (shortName && entityMap.has(shortName)) targetId = entityMap.get(shortName);
+            }
+
+            if (targetId && entityMap.has(targetId)) {
+                const edgeColor = isCollection ? '#3b82f6' : '#10b981'; // 蓝 / 绿
+                
+                edges.push({
+                    id: `${entity.name}-${nav.name}-${targetId}`,
+                    source: { 
+                        cell: entity.name, 
+                        // 关键：尝试连接到具体的导航属性行
+                        // 在 EntityNode 中，我们给每一行加了 id={`nav-${nav.name}`} 和 magnet="true"
+                        // X6 支持 selector 选择器来定位 source magnet
+                        // 但是 React Shape 渲染是异步且 shadow DOM 隔离的，直接 selector 有时不稳定。
+                        // 这里最稳妥的是直接连到节点，但让路由去优化。
+                        // 如果要精确连接，需要 selector: `[id="nav-${nav.name}"]`
+                        selector: `[id="nav-${nav.name}"]`
+                    },
+                    target: targetId,
+                    zIndex: isCollection ? 10 : 1,
+                    attrs: {
+                        line: {
+                            stroke: edgeColor,
+                            strokeWidth: isCollection ? 2 : 1.5,
+                            targetMarker: {
+                                name: 'block',
+                                width: 8,
+                                height: 8,
+                                offset: 0, 
+                            },
+                        },
+                    },
+                    labels: [
+                        {
+                            attrs: {
+                                label: {
+                                    text: isCollection ? '1..N' : '1..1',
+                                    fill: edgeColor,
+                                    fontSize: 10,
+                                    fontWeight: 'bold',
+                                },
+                                body: {
+                                    fill: '#ffffff',
+                                    stroke: edgeColor,
+                                    strokeWidth: 1,
+                                    rx: 4,
+                                    ry: 4,
+                                    refWidth: '140%',
+                                    refHeight: '130%',
+                                    refX: '-20%',
+                                    refY: '-15%',
+                                }
+                            },
+                            position: 0.5, // 标签在中间
+                        }
+                    ]
+                });
             }
         });
+    });
 
-        // 1. 构建节点
-        schema.entities.forEach((entity) => {
-            const estimatedH = estimateNodeHeight(entity);
-            rawNodes.push({
-                id: entity.name,
-                type: 'entity',
-                data: { entity, height: estimatedH }, // 传入估算高度供 ELK 使用
-                position: { x: 0, y: 0 }, 
-                draggable: true,
-            });
-        });
+    // 3. 计算布局 (Dagre)
+    const dagreLayout = new DagreLayout({
+        type: 'dagre',
+        rankdir: 'LR',
+        align: 'UL',
+        ranksep: 100, // 层级间距
+        nodesep: 60,  // 节点垂直间距
+        controlPoints: true,
+    });
 
-        // 2. 构建连线
-        schema.entities.forEach((entity) => {
-            entity.navigationProperties.forEach((nav) => {
-                let rawTargetType = nav.type;
-                const isCollection = rawTargetType.startsWith('Collection(');
-                if (isCollection) {
-                    rawTargetType = rawTargetType.substring(11, rawTargetType.length - 1);
-                }
+    const model = dagreLayout.layout({
+        nodes: nodes,
+        edges: edges.map(e => ({ source: e.source.cell || e.source, target: e.target, id: e.id })), // 简化 edge 对象给 layout 计算用
+    });
 
-                let targetId = entityMap.get(rawTargetType);
-                if (!targetId) {
-                    const shortName = rawTargetType.split('.').pop();
-                    if (shortName && entityMap.has(shortName)) {
-                        targetId = entityMap.get(shortName);
-                    }
-                }
+    // 应用布局坐标
+    nodes.forEach(node => {
+        const layoutNode = model.nodes?.find((n: any) => n.id === node.id);
+        if (layoutNode) {
+            node.x = layoutNode.x;
+            node.y = layoutNode.y;
+        }
+    });
 
-                if (targetId && entityMap.has(targetId)) {
-                    // 避免自引用导致的布局混乱（可选，但通常 ER 图可以有自引用，ELK 处理得很好）
-                    
-                    const edgeId = `${entity.name}-${nav.name}-${targetId}`;
-                    const edgeColor = isCollection ? '#3b82f6' : '#10b981';
-                    const edgeWidth = isCollection ? 2 : 1.5;
-                    
-                    rawEdges.push({
-                        id: edgeId,
-                        source: entity.name,
-                        target: targetId,
-                        sourceHandle: nav.name, 
-                        targetHandle: 'target-input', 
-                        type: 'step', // 坚持使用 step 直角线
-                        animated: false,
-                        zIndex: isCollection ? 10 : 1, 
-                        label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: edgeColor, fontWeight: 700, fontSize: 10 }, 
-                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95, stroke: edgeColor, strokeWidth: 0.5, rx: 2, ry: 2 },
-                        style: { 
-                            stroke: edgeColor, 
-                            strokeWidth: edgeWidth,
-                        },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
-                    });
-                }
-            });
-        });
+    // 4. 渲染
+    graph.fromJSON({ nodes, edges });
+    
+    // 5. 自动适配
+    setTimeout(() => {
+        graph.centerContent();
+        // 如果图太小，就缩放一下
+        graph.zoomToFit({ padding: 40, maxScale: 1.5 });
+    }, 100);
 
-        setEdges(rawEdges);
-        // 初始计算布局
-        computeLayout(rawNodes, rawEdges, true);
+    return () => {
+      graph.dispose();
+    };
+  }, [schema]);
 
-    }, [schema, computeLayout, setEdges]); // 注意依赖项
-
-    if (!schema || !schema.entities || schema.entities.length === 0) {
-        return (
-            <div className="flex items-center justify-center h-full text-slate-400">
-                No entities to display.
-            </div>
-        );
-    }
-
-    return (
-        <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            connectionLineType={ConnectionLineType.Step}
-            minZoom={0.05}
-            maxZoom={2}
-            defaultEdgeOptions={{ type: 'step' }} 
-            proOptions={{ hideAttribution: true }}
-            className="bg-slate-50"
-        >
-            <Background color="#cbd5e1" gap={24} size={1} />
-            <Controls className="bg-white shadow-md border border-slate-200 rounded-lg overflow-hidden" />
-            <Panel position="top-right" className="flex gap-2">
-                <button 
-                    onClick={() => computeLayout(nodes, edges, false)}
-                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
-                >
-                    Grid Layout
-                </button>
-                <button 
-                    onClick={() => computeLayout(nodes, edges, true)}
-                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
-                >
-                    ELK Layout (Auto)
-                </button>
-                <button 
-                    onClick={() => fitView({ padding: 0.2, duration: 500 })}
-                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
-                >
-                    Fit View
-                </button>
-            </Panel>
-        </ReactFlow>
-    );
-};
-
-const ERDiagram: React.FC<ERDiagramProps> = (props) => {
-    return (
-        <div className="w-full h-full flex-1 relative min-h-[500px] bg-slate-100">
-            <ReactFlowProvider>
-                <ERDiagramInner {...props} />
-            </ReactFlowProvider>
+  return (
+    <div className="w-full h-full relative">
+        <div ref={containerRef} className="w-full h-full" />
+        
+        {/* 控制面板 */}
+        <div className="absolute top-4 right-4 flex gap-2 bg-white/90 p-1.5 rounded-lg shadow-md border border-slate-200 backdrop-blur-sm z-10">
+            <button 
+                onClick={() => graphRef.current?.zoomToFit({ padding: 40, maxScale: 1.5 })}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
+            >
+                Fit
+            </button>
+            <button 
+                onClick={() => graphRef.current?.zoom(0.1)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
+            >
+                +
+            </button>
+            <button 
+                onClick={() => graphRef.current?.zoom(-0.1)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition"
+            >
+                -
+            </button>
         </div>
-    );
+    </div>
+  );
 };
 
 export default ERDiagram;
