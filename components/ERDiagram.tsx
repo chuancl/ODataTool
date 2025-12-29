@@ -42,11 +42,11 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
   if (!dagreGraph) return null;
 
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  // 调整 rankdir 为 LR (从左到右)，减少间距让布局更紧凑自然
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 80, ranksep: 200 });
+  // LR: Left to Right 布局
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 100, ranksep: 250 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 250, height: 300 }); 
+    dagreGraph.setNode(node.id, { width: 280, height: 300 }); 
   });
 
   const nodeIds = new Set(nodes.map(n => n.id));
@@ -76,7 +76,7 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - 125,
+        x: nodeWithPosition.x - 140,
         y: nodeWithPosition.y - 150,
       },
     };
@@ -84,16 +84,15 @@ const getSmartLayout = (nodes: Node[], edges: Edge[]) => {
 };
 
 const getGridLayout = (nodes: Node[]) => {
-    // 增加一点随机性，避免过于死板的网格
-    const COLUMNS = 5;
-    const X_SPACING = 320;
-    const Y_SPACING = 400;
+    const COLUMNS = 4;
+    const X_SPACING = 350;
+    const Y_SPACING = 450;
     
     return nodes.map((node, index) => ({
         ...node,
         position: {
-            x: (index % COLUMNS) * X_SPACING + Math.random() * 50,
-            y: Math.floor(index / COLUMNS) * Y_SPACING + Math.random() * 50
+            x: (index % COLUMNS) * X_SPACING,
+            y: Math.floor(index / COLUMNS) * Y_SPACING
         },
     }));
 };
@@ -151,26 +150,31 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
 
                 if (targetId && entityMap.has(targetId)) {
                     const edgeId = `${entity.name}-${nav.name}-${targetId}`;
-                    // 确保不指定 sourceHandle 和 targetHandle，让 React Flow 使用 EntityNode 中的默认 Handle
+                    
+                    // 连线配置
                     rawEdges.push({
                         id: edgeId,
                         source: entity.name,
                         target: targetId,
-                        type: 'smoothstep', 
+                        
+                        // 核心修改：指定 Source Handle ID 为属性名，Target Handle ID 为 'target-input'
+                        sourceHandle: nav.name, 
+                        targetHandle: 'target-input', 
+
+                        type: 'smoothstep',  // 使用直角连线，风格更像 OData 图表
                         animated: false,
                         zIndex: 10, 
                         label: isCollection ? '1..N' : '1..1',
-                        labelStyle: { fill: '#3b82f6', fontWeight: 700, fontSize: 10 },
-                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
-                        style: { stroke: '#3b82f6', strokeWidth: 2 },
-                        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
+                        labelStyle: { fill: '#4f46e5', fontWeight: 700, fontSize: 11 }, // Indigo 600
+                        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95, rx: 4, ry: 4 },
+                        style: { stroke: '#4f46e5', strokeWidth: 2 }, // Indigo 600
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#4f46e5' },
                     });
                 }
             });
         });
 
         let layoutedNodes = getSmartLayout(rawNodes, rawEdges);
-        // 如果 Dagre 布局失败（极少情况），使用带随机性的网格布局
         if (!layoutedNodes) {
             layoutedNodes = getGridLayout(rawNodes);
         }
@@ -210,7 +214,7 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
             proOptions={{ hideAttribution: true }}
             className="bg-slate-50"
         >
-            <Background color="#94a3b8" gap={30} size={1} />
+            <Background color="#94a3b8" gap={24} size={1} />
             <Controls />
             <Panel position="top-right" className="flex gap-2">
                 <button 
@@ -219,13 +223,13 @@ const ERDiagramInner: React.FC<ERDiagramProps> = ({ schema }) => {
                         setNodes(gridNodes);
                         setTimeout(() => fitView({ duration: 500 }), 50);
                     }}
-                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-blue-600 backdrop-blur-sm"
+                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
                 >
                     Free Layout
                 </button>
                 <button 
                     onClick={() => fitView({ padding: 0.2, duration: 500 })}
-                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-blue-600 backdrop-blur-sm"
+                    className="bg-white/90 px-3 py-1.5 rounded-lg shadow-sm border border-slate-300 text-xs font-bold text-slate-700 hover:text-indigo-600 backdrop-blur-sm transition"
                 >
                     Fit View
                 </button>

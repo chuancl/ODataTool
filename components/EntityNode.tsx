@@ -14,23 +14,18 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
   const otherProperties = entity.properties.filter(p => !entity.keys.includes(p.name));
 
   return (
-    <div className="relative min-w-[220px] max-w-[320px] font-sans text-xs shadow-xl rounded-lg bg-white border border-slate-200">
+    <div className="relative min-w-[220px] max-w-[320px] font-sans text-xs shadow-xl rounded-lg bg-white border border-slate-200 group/node">
       
       {/* 
-         核心修复：
-         为了保证连线 100% 出现，每个节点只保留一个 输入点 (Left) 和一个 输出点 (Right)。
-         React Flow 会自动匹配这两个唯一的 Handle，不需要复杂的 ID 映射。
+         全局输入点 (Target)
+         位于节点左侧顶部（Header附近），作为所有进入该节点连线的终点。
+         ID="target-input" 供 ERDiagram 引用。
       */}
       <Handle 
         type="target" 
         position={Position.Left} 
-        className="!w-2.5 !h-2.5 !bg-blue-600 !border-2 !border-white !rounded-full !-left-[5px] top-4 transition-transform hover:scale-150 z-50" 
-      />
-      
-      <Handle 
-        type="source" 
-        position={Position.Right} 
-        className="!w-2.5 !h-2.5 !bg-blue-600 !border-2 !border-white !rounded-full !-right-[5px] top-4 transition-transform hover:scale-150 z-50" 
+        id="target-input"
+        className="!w-3 !h-3 !bg-indigo-600 !border-2 !border-white !rounded-full !-left-[6px] top-8 transition-transform hover:scale-125 z-50" 
       />
 
       {/* 标题栏 */}
@@ -48,10 +43,10 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
           )}
       </div>
 
-      {/* 属性列表容器 */}
+      {/* 内容区域 */}
       <div className="divide-y divide-slate-100">
           
-          {/* Keys - 类似主键区域 */}
+          {/* 主键区域 */}
           {keyProperties.length > 0 && (
             <div className="bg-amber-50/60">
             {keyProperties.map((prop) => (
@@ -66,7 +61,7 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
             </div>
           )}
 
-          {/* 普通属性 - 限制显示高度，防止太长 */}
+          {/* 普通属性区域 */}
           <div className="bg-white max-h-[160px] overflow-y-auto custom-scrollbar">
             {otherProperties.map((prop) => (
             <div key={prop.name} className="flex items-center justify-between px-3 py-1.5 hover:bg-slate-50 group transition-colors">
@@ -76,18 +71,33 @@ const EntityNode = ({ data }: { data: EntityNodeData }) => {
             ))}
           </div>
 
-          {/* 导航属性 (连线关系) */}
+          {/* 
+            导航属性区域 (Navigation Properties)
+            这里每一行都会放置一个 Source Handle，对应图中的红色连线起点。
+          */}
           {entity.navigationProperties.length > 0 && (
-            <div className="bg-slate-50/80 border-t border-slate-200">
+            <div className="bg-slate-50/80 border-t border-slate-200 pb-1">
             {entity.navigationProperties.map((nav) => {
                 const isCollection = nav.type.includes('Collection(');
                 return (
-                <div key={nav.name} className="flex items-center justify-between px-3 py-1.5 hover:bg-blue-50/80 transition-colors cursor-default">
+                <div key={nav.name} className="relative flex items-center justify-between px-3 py-1.5 hover:bg-indigo-50 transition-colors cursor-default group/item">
+                    {/* 
+                        !!! 关键点 !!!
+                        每个属性行右侧都有一个专属的 Source Handle。
+                        ID = nav.name (属性名)
+                    */}
+                    <Handle
+                        type="source"
+                        position={Position.Right}
+                        id={nav.name}
+                        className="!w-2 !h-2 !bg-indigo-500 !border-2 !border-white !rounded-full !-right-[5px] top-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-50"
+                    />
+                    
                     <div className="flex items-center gap-2 truncate">
-                    <Braces className="w-3 h-3 flex-shrink-0 text-slate-400" />
-                    <span className="truncate font-medium text-xs text-blue-700" title={nav.name}>{nav.name}</span>
+                    <Braces className="w-3 h-3 flex-shrink-0 text-slate-400 group-hover/item:text-indigo-500" />
+                    <span className="truncate font-medium text-xs text-indigo-700" title={nav.name}>{nav.name}</span>
                     </div>
-                    {isCollection && <span className="text-[9px] bg-white border border-blue-200 text-blue-600 px-1 rounded-sm font-mono shadow-sm">1:N</span>}
+                    {isCollection && <span className="text-[9px] bg-white border border-indigo-200 text-indigo-600 px-1 rounded-sm font-mono shadow-sm">1:N</span>}
                 </div>
                 );
             })}
