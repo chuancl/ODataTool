@@ -1,6 +1,16 @@
 import { ODataSchema, ODataEntity, ODataProperty, ODataNavigationProperty } from '../types';
 
 /**
+ * 验证字符串内容是否为有效的 OData Metadata XML
+ */
+export const isValidODataMetadata = (content: string): boolean => {
+    if (!content || typeof content !== 'string') return false;
+    // 检查是否包含关键的 Edmx 标签
+    return (content.includes('<edmx:Edmx') || content.includes('<Edmx')) && 
+           (content.includes('Version="1.0"') || content.includes('Version="4.0"'));
+};
+
+/**
  * 解析 XML 格式的 OData $metadata 内容
  */
 export const parseODataMetadata = (xmlContent: string): ODataSchema => {
@@ -94,7 +104,7 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
 };
 
 /**
- * 判断当前页面/内容是否是 OData 服务
+ * 判断当前页面/内容是否是 OData 服务 (被动检测)
  * @param force 如果为 true (白名单)，则只要有一点像就认为是
  */
 export const isODataPage = (doc: Document, url: string, force: boolean = false): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
@@ -103,7 +113,6 @@ export const isODataPage = (doc: Document, url: string, force: boolean = false):
     const contentType = doc.contentType;
     if (force) {
         if (contentType.includes('xml') || contentType.includes('json') || url.includes('$metadata')) {
-             // 简单的类型推断
              if (url.includes('$metadata')) return { isOData: true, type: 'metadata' };
              return { isOData: true, type: 'unknown' };
         }
@@ -143,7 +152,7 @@ export const isODataPage = (doc: Document, url: string, force: boolean = false):
         }
     }
 
-    // 3. URL 辅助判断 (必须配合内容验证，除非是 force 模式)
+    // 3. URL 辅助判断
     if (url.includes('$metadata') && (contentType.includes('xml') || bodyText.includes('xml'))) {
         return { isOData: true, type: 'metadata' };
     }
@@ -151,11 +160,30 @@ export const isODataPage = (doc: Document, url: string, force: boolean = false):
     return { isOData: false, type: 'unknown' };
 };
 
+/**
+ * 推断 Metadata URL
+ * 例如: 
+ * - http://host/service.svc/Customers -> http://host/service.svc/$metadata
+ * - http://host/service.svc -> http://host/service.svc/$metadata
+ */
 export const inferMetadataUrl = (url: string): string => {
-    if (url.includes('$metadata')) return url;
-    let cleanUrl = url.split('?')[0].replace(/\/$/, '');
-    if (cleanUrl.endsWith('.svc')) {
-        return `${cleanUrl}/$metadata`;
+    if (url.toLowerCase().endsWith('$metadata')) return url;
+    
+    // 移除查询参数
+    let baseUrl = url.split('?')[0];
+    
+    // 如果包含 .svc，通常 Metadata 在 .svc/$metadata
+    if (baseUrl.includes('.svc')) {
+        const parts = baseUrl.split('.svc');
+        return `${parts[0]}.svc/$metadata`;
     }
-    return `${cleanUrl}/$metadata`;
+    
+    // 如果没有 .svc，尝试直接在末尾添加 (处理 V4 RESTful 风格)
+    // 移除末尾斜杠
+    baseUrl = baseUrl.replace(/\/$/, '');
+    
+    // 简单的启发式：如果是 /EntitySet 结尾，去掉一级再加 $metadata
+    // 但最通用的做法是直接拼，或者让 Viewer 去试错。
+    // 这里我们尝试直接追加，因为对于 probe 来说，我们通常是在 service root 或 entity set 上
+    return `${baseUrl}/$metadata`;
 };
