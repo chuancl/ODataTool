@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, BookOpen, Play, RotateCcw, Save, Languages, Loader2 } from 'lucide-react';
-// Fix: Import browser API from wxt/browser to fix 'chrome' namespace errors
+// 修复：从 wxt/browser 导入 browser API 以解决 'chrome' 命名空间错误
 import { browser } from 'wxt/browser';
 import { UserSettings } from './types';
 
-// Mock storage for development in browser environment, in real extension use chrome.storage
+// 在浏览器环境中模拟存储，在实际扩展中使用 browser.storage
 const loadSettings = (): UserSettings => {
   const saved = localStorage.getItem('immersion_settings');
   return saved ? JSON.parse(saved) : {
-    apiKey: '',
     difficulty: 'intermediate',
     immersionRate: 30,
     customVocabulary: []
@@ -17,7 +16,7 @@ const loadSettings = (): UserSettings => {
 
 const saveSettings = (settings: UserSettings) => {
   localStorage.setItem('immersion_settings', JSON.stringify(settings));
-  // In WXT/Chrome Extension:
+  // 在 WXT/Chrome 扩展中：
   // browser.storage.sync.set(settings);
 };
 
@@ -29,45 +28,40 @@ const App: React.FC = () => {
   const [vocabInput, setVocabInput] = useState('');
 
   useEffect(() => {
-    // Load settings on mount
+    // 组件加载时读取设置
     const s = loadSettings();
     setSettings(s);
   }, []);
 
   const handleSaveSettings = () => {
     saveSettings(settings);
-    setStatusMessage('Settings saved!');
+    setStatusMessage('设置已保存！');
     setTimeout(() => setStatusMessage(''), 2000);
   };
 
   const handleStartImmersion = async () => {
-    if (!settings.apiKey) {
-      setStatusMessage('Please set API Key in settings first.');
-      return;
-    }
-
     setIsProcessing(true);
-    setStatusMessage('Analyzing page content...');
+    setStatusMessage('正在分析页面内容...');
 
     try {
-      // In a real extension, we query the active tab
-      // Fix: Use browser.tabs.query instead of chrome.tabs.query
+      // 在实际扩展中，查询当前活动标签页
+      // 修复：使用 browser.tabs.query 代替 chrome.tabs.query
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
-        // Send message to content script
-        // Fix: Use browser.tabs.sendMessage instead of chrome.tabs.sendMessage
+        // 发送消息给内容脚本 (content script)
+        // 修复：使用 browser.tabs.sendMessage 代替 chrome.tabs.sendMessage
         await browser.tabs.sendMessage(tab.id, { 
           type: 'START_IMMERSION', 
           settings: settings 
         });
-        setStatusMessage('Immersion active!');
+        setStatusMessage('沉浸模式已激活！');
       } else {
-        setStatusMessage('No active tab found.');
+        setStatusMessage('未找到活动标签页。');
       }
     } catch (e) {
       console.error(e);
-      // Fallback for local development testing (no chrome API)
-      setStatusMessage('Extension environment not detected. (Check console)');
+      // 本地开发测试的回退提示
+      setStatusMessage('未检测到扩展环境。(请查看控制台)');
     } finally {
       setIsProcessing(false);
     }
@@ -75,15 +69,15 @@ const App: React.FC = () => {
 
   const handleReset = async () => {
     try {
-      // Fix: Use browser.tabs.query instead of chrome.tabs.query
+      // 修复：使用 browser.tabs.query 代替 chrome.tabs.query
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
-        // Fix: Use browser.tabs.sendMessage instead of chrome.tabs.sendMessage
+        // 修复：使用 browser.tabs.sendMessage 代替 chrome.tabs.sendMessage
         await browser.tabs.sendMessage(tab.id, { type: 'RESET_PAGE' });
-        setStatusMessage('Page reset.');
+        setStatusMessage('页面已重置。');
       }
     } catch (e) {
-      setStatusMessage('Could not reset page.');
+      setStatusMessage('无法重置页面。');
     }
   };
 
@@ -102,29 +96,31 @@ const App: React.FC = () => {
 
   return (
     <div className="w-full h-full min-h-[500px] bg-slate-50 text-slate-800 flex flex-col font-sans">
-      {/* Header */}
+      {/* 头部导航 */}
       <header className="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <BookOpen className="w-5 h-5" />
-          <h1 className="font-bold text-lg">Context Immersion</h1>
+          <h1 className="font-bold text-lg">沉浸式英语</h1>
         </div>
         <div className="flex gap-2">
           <button 
             onClick={() => setActiveTab('home')}
             className={`p-2 rounded-full hover:bg-blue-500 transition ${activeTab === 'home' ? 'bg-blue-700' : ''}`}
+            title="主页"
           >
             <Languages className="w-5 h-5" />
           </button>
           <button 
             onClick={() => setActiveTab('settings')}
             className={`p-2 rounded-full hover:bg-blue-500 transition ${activeTab === 'settings' ? 'bg-blue-700' : ''}`}
+            title="设置"
           >
             <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* 主要内容区 */}
       <main className="flex-1 p-4 overflow-y-auto">
         {statusMessage && (
           <div className="mb-4 p-3 bg-blue-100 text-blue-800 rounded-lg text-sm font-medium animate-pulse">
@@ -135,9 +131,9 @@ const App: React.FC = () => {
         {activeTab === 'home' ? (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-2 text-slate-700">Active Learning</h2>
+              <h2 className="text-lg font-semibold mb-2 text-slate-700">主动学习</h2>
               <p className="text-sm text-slate-500 mb-4">
-                Replace Chinese text on the current page with English based on your settings.
+                根据您的设置，将当前页面上的中文文本替换为英文。
               </p>
               
               <div className="flex flex-col gap-3">
@@ -147,7 +143,7 @@ const App: React.FC = () => {
                   className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                 >
                   {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                  {isProcessing ? 'Immersing...' : 'Start Immersion'}
+                  {isProcessing ? '正在处理...' : '开始沉浸'}
                 </button>
 
                 <button
@@ -155,15 +151,15 @@ const App: React.FC = () => {
                   className="flex items-center justify-center gap-2 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-2 px-4 rounded-lg transition"
                 >
                   <RotateCcw className="w-4 h-4" />
-                  Reset Page
+                  重置页面
                 </button>
               </div>
             </div>
 
             <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-3">
-                <h3 className="font-semibold text-slate-700">Vocabulary Focus</h3>
-                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{settings.customVocabulary.length} words</span>
+                <h3 className="font-semibold text-slate-700">重点词汇</h3>
+                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{settings.customVocabulary.length} 个词</span>
               </div>
               <div className="flex gap-2 mb-3">
                 <input
@@ -171,14 +167,14 @@ const App: React.FC = () => {
                   value={vocabInput}
                   onChange={(e) => setVocabInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addVocabWord()}
-                  placeholder="Add target word..."
+                  placeholder="添加目标单词..."
                   className="flex-1 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
                 <button 
                   onClick={addVocabWord}
                   className="bg-slate-800 text-white px-3 py-2 rounded-md hover:bg-slate-700"
                 >
-                  Add
+                  添加
                 </button>
               </div>
               <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
@@ -189,7 +185,7 @@ const App: React.FC = () => {
                   </span>
                 ))}
                 {settings.customVocabulary.length === 0 && (
-                  <p className="text-xs text-slate-400 italic">No custom words added yet.</p>
+                  <p className="text-xs text-slate-400 italic">暂无自定义单词。</p>
                 )}
               </div>
             </div>
@@ -197,39 +193,25 @@ const App: React.FC = () => {
         ) : (
           <div className="space-y-5">
              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-4 text-slate-700">Configuration</h2>
+              <h2 className="text-lg font-semibold mb-4 text-slate-700">配置</h2>
               
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Gemini API Key</label>
-                  <input
-                    type="password"
-                    value={settings.apiKey}
-                    onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
-                    placeholder="Enter your Google GenAI API Key"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">
-                    Key is stored locally in your browser.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Difficulty Level</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">难度等级</label>
                   <select
                     value={settings.difficulty}
                     onChange={(e) => setSettings({ ...settings, difficulty: e.target.value as any })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   >
-                    <option value="beginner">Beginner (Simple words)</option>
-                    <option value="intermediate">Intermediate (Phrases/Idioms)</option>
-                    <option value="advanced">Advanced (Complex/Academic)</option>
+                    <option value="beginner">初级 (简单词汇)</option>
+                    <option value="intermediate">中级 (短语/习语)</option>
+                    <option value="advanced">高级 (复杂/学术)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Immersion Rate: {settings.immersionRate}%
+                    沉浸率: {settings.immersionRate}%
                   </label>
                   <input
                     type="range"
@@ -240,8 +222,8 @@ const App: React.FC = () => {
                     className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   />
                   <div className="flex justify-between text-xs text-slate-400 mt-1">
-                    <span>Subtle</span>
-                    <span>Intense</span>
+                    <span>轻度</span>
+                    <span>深度</span>
                   </div>
                 </div>
               </div>
@@ -252,14 +234,14 @@ const App: React.FC = () => {
               className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition shadow-sm"
             >
               <Save className="w-5 h-5" />
-              Save Settings
+              保存设置
             </button>
           </div>
         )}
       </main>
       
       <footer className="bg-slate-50 p-3 text-center text-xs text-slate-400 border-t border-slate-200">
-        Powered by Google Gemini 2.5 Flash
+        Powered by Context Immersion
       </footer>
     </div>
   );

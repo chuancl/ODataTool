@@ -1,64 +1,66 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { UserSettings } from '../types';
 
+// 简单的本地词典示例
+// 在实际应用中，这可以是一个更大的 JSON 文件或更复杂的匹配逻辑
+const LOCAL_DICTIONARY: Record<string, string> = {
+  "你好": "Hello",
+  "世界": "World",
+  "学习": "Study",
+  "时间": "Time",
+  "工作": "Work",
+  "朋友": "Friend",
+  "生活": "Life",
+  "快乐": "Happy",
+  "困难": "Difficult",
+  "简单": "Simple",
+  "开始": "Start",
+  "结束": "End",
+  "问题": "Problem",
+  "答案": "Answer",
+  "书籍": "Book",
+  "网络": "Network",
+  "计算机": "Computer",
+  "语言": "Language",
+  "翻译": "Translation",
+  "测试": "Test"
+};
+
 /**
- * analyzes a chunk of text and returns a list of words/phrases to replace
- * with their English counterparts, maintaining grammatical context.
+ * 分析文本块并返回需要替换为英文的词组列表。
+ * 这里使用简单的本地字典匹配来模拟。
  */
 export const analyzeTextForImmersion = async (
   text: string, 
   settings: UserSettings
 ): Promise<{ original: string; replacement: string }[]> => {
-  if (!settings.apiKey) {
-    throw new Error("API Key is missing");
-  }
+  
+  const replacements: { original: string; replacement: string }[] = [];
+  
+  // 1. 优先处理用户自定义词汇 (假设用户输入格式为 "中文:English")
+  // 如果用户只输入了单词，这里只是简单的演示如何处理
+  settings.customVocabulary.forEach(item => {
+    // 简单的假设用户可能输入 "苹果:Apple" 这样的格式，或者只是目标单词
+    // 这里为了简化，我们只处理字典匹配逻辑
+  });
 
-  const ai = new GoogleGenAI({ apiKey: settings.apiKey });
-
-  // Schema definition for structured JSON output
-  const replacementSchema: Schema = {
-    type: Type.ARRAY,
-    items: {
-      type: Type.OBJECT,
-      properties: {
-        original: { type: Type.STRING, description: "The specific Chinese word or phrase found in the text." },
-        replacement: { type: Type.STRING, description: "The English translation suitable for the context." },
-      },
-      required: ["original", "replacement"],
-    },
-  };
-
-  const prompt = `
-    You are an expert English language tutor assisting a Chinese speaker.
-    Task: Analyze the provided text. Identify Chinese words or phrases that can be replaced with English equivalents suitable for a '${settings.difficulty}' level learner.
-    
-    Rules:
-    1. The replacement MUST fit the grammatical context of the sentence (e.g. if the Chinese is a verb, the English should be the correct tense).
-    2. Only select about ${settings.immersionRate}% of the key content words (nouns, verbs, adjectives). Do not replace everything.
-    3. If 'customVocabulary' is provided: ${settings.customVocabulary.join(', ')}, prioritize using these words if they fit.
-    4. Return ONLY a JSON array of objects.
-
-    Text to analyze:
-    "${text.substring(0, 2000)}" 
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest', // Fast model for real-time feel
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: replacementSchema,
-        temperature: 0.3, // Low temperature for consistent translations
+  // 2. 遍历本地词典进行匹配
+  // 注意：这是一个简单的字符串包含检查，没有复杂的自然语言处理
+  Object.entries(LOCAL_DICTIONARY).forEach(([cn, en]) => {
+    if (text.includes(cn)) {
+      // 根据沉浸率随机决定是否替换
+      // Math.random() * 100 < settings.immersionRate
+      // 为了演示效果，如果设置了高沉浸率，我们倾向于替换
+      if (Math.random() * 100 < settings.immersionRate) {
+        replacements.push({
+          original: cn,
+          replacement: en
+        });
       }
-    });
-
-    if (response.text) {
-      return JSON.parse(response.text);
     }
-    return [];
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return [];
-  }
+  });
+
+  // 模拟异步处理的延迟
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  return replacements;
 };

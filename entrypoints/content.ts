@@ -1,24 +1,23 @@
 import { defineContentScript } from 'wxt/sandbox';
-// Fix: Import browser API from wxt/browser to fix 'chrome' namespace errors
+// 修复：从 wxt/browser 导入 browser API 以解决 'chrome' 命名空间错误
 import { browser } from 'wxt/browser';
 import { analyzeTextForImmersion } from '../services/geminiService';
 import { UserSettings, ExtensionMessage } from '../types';
 
-// We cannot import the service directly if it uses secrets, but for this demo 
-// we assume the key is passed via message or stored in chrome.storage.
-// However, 'analyzeTextForImmersion' runs in the content script context here.
-// NOTE: In production, API calls should often be proxied through background script to avoid CORS,
-// but Chrome Extensions V3 allow fetch from content scripts if host permissions are set.
+// 我们无法直接导入包含密钥的服务，但在这个演示中，
+// analyzeTextForImmersion 函数现在是一个本地逻辑，不包含敏感密钥。
+// 注意：在生产环境中，API 调用通常应通过后台脚本 (background script) 代理以避免 CORS 问题，
+// 但 Chrome Extensions V3 允许在配置了 host permissions 的情况下从内容脚本发起 fetch。
 
 export default defineContentScript({
   matches: ['<all_urls>'],
   main() {
-    console.log('Context Immersion Content Script Loaded');
+    console.log('Context Immersion Content Script Loaded (中文版)');
 
-    // Store original HTML to allow reset
+    // 存储原始 HTML 以便重置
     let originalBodyHTML: string | null = null;
 
-    // Fix: Use browser.runtime.onMessage instead of chrome.runtime.onMessage
+    // 修复：使用 browser.runtime.onMessage 代替 chrome.runtime.onMessage
     browser.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
       const msg = message as ExtensionMessage;
       if (msg.type === 'START_IMMERSION') {
@@ -35,13 +34,13 @@ export default defineContentScript({
     });
 
     async function processPage(settings: UserSettings) {
-      // 1. Identify text nodes effectively
+      // 1. 有效地识别文本节点
       const walker = document.createTreeWalker(
         document.body,
         NodeFilter.SHOW_TEXT,
         {
           acceptNode: (node) => {
-            // Skip script, style, and hidden elements
+            // 跳过 script, style 和隐藏元素
             const parent = node.parentElement;
             if (!parent) return NodeFilter.FILTER_REJECT;
             const tagName = parent.tagName.toLowerCase();
@@ -51,7 +50,7 @@ export default defineContentScript({
             if (node.textContent?.trim().length === 0) {
               return NodeFilter.FILTER_REJECT;
             }
-            // Simple check for Chinese characters
+            // 简单的中文检查
             if (!/[\u4e00-\u9fa5]/.test(node.textContent || '')) {
               return NodeFilter.FILTER_REJECT;
             }
@@ -67,30 +66,29 @@ export default defineContentScript({
         currentNode = walker.nextNode();
       }
 
-      // 2. Optimization: Only process visible nodes or top N nodes to save tokens
-      // For this demo, let's process the first 5 significant chunks
+      // 2. 优化：仅处理前 N 个节点以节省性能（演示用）
+      // 这里我们只处理前 5 个重要的文本块
       const nodesToProcess = textNodes.slice(0, 5); 
 
-      // Show a loading indicator on the page (optional)
+      // 在页面上显示加载指示器（可选）
       const loader = document.createElement('div');
-      loader.innerText = 'Immersing English...';
-      loader.style.cssText = 'position:fixed;top:10px;right:10px;background:#2563eb;color:white;padding:10px;border-radius:5px;z-index:9999;';
+      loader.innerText = '正在融入英语...';
+      loader.style.cssText = 'position:fixed;top:10px;right:10px;background:#2563eb;color:white;padding:10px;border-radius:5px;z-index:9999;font-family:sans-serif;';
       document.body.appendChild(loader);
 
       for (const node of nodesToProcess) {
         const originalText = node.textContent || '';
         
         try {
-          // Call Gemini Service
-          // NOTE: This runs in the context of the page. 
-          // Ensure host_permissions allow access to Gemini API or proxy via background.
+          // 调用服务进行分析
+          // 注意：这在页面上下文中运行。
           const replacements = await analyzeTextForImmersion(originalText, settings);
 
           if (replacements && replacements.length > 0) {
             replaceTextInNode(node, originalText, replacements);
           }
         } catch (err) {
-          console.error("Error processing node:", err);
+          console.error("处理节点时出错:", err);
         }
       }
 
@@ -103,27 +101,27 @@ export default defineContentScript({
 
       let html = originalText;
       
-      // Sort replacements by length desc to avoid partial replacement issues
+      // 按长度降序排序，以避免部分替换问题
       replacements.sort((a, b) => b.original.length - a.original.length);
 
       replacements.forEach(item => {
-        // Escape regex special chars in the original string
+        // 对原始字符串中的正则特殊字符进行转义
         const escapedOriginal = item.original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(escapedOriginal, 'g');
         
-        // Styled replacement with tooltip
+        // 带有工具提示的样式化替换
         const replacementHTML = `
           <span 
             class="immersion-highlight" 
             style="color: #2563eb; font-weight: 500; cursor: help; border-bottom: 1px dashed #2563eb;" 
-            title="Original: ${item.original}"
+            title="原文: ${item.original}"
           >${item.replacement}</span>
         `;
         
         html = html.replace(regex, replacementHTML);
       });
 
-      // If changes occurred, update DOM
+      // 如果发生了更改，则更新 DOM
       if (html !== originalText) {
         const span = document.createElement('span');
         span.innerHTML = html;
