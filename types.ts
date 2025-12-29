@@ -15,7 +15,7 @@ export interface ODataProperty {
 
 export interface ODataNavigationProperty {
   name: string;
-  type: string; // 关联的实体类型
+  type: string; // 关联的实体类型 (e.g., "Collection(NorthwindModel.Order)" or "NorthwindModel.Category")
   referentialConstraint?: {
     property: string;
     referencedProperty: string;
@@ -37,3 +37,13 @@ export interface ViewerState {
   error?: string;
   schema?: ODataSchema;
 }
+
+export interface AppSettings {
+  enableGlobal: boolean;
+  whitelist: string[]; // 存储 URL 包含的关键词或正则
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  enableGlobal: true,
+  whitelist: []
+};

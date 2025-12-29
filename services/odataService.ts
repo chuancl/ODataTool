@@ -7,11 +7,9 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
 
-  const edmx = xmlDoc.getElementsByTagName("edmx:Edmx")[0] || xmlDoc.getElementsByTagName("Edmx")[0];
+  const edmx = xmlDoc.getElementsByTagName("edmx:Edmx")[0] || xmlDoc.getElementsByTagName("Edmx")[0] || xmlDoc.querySelector("Edmx");
   if (!edmx) {
-      // 某些情况下 getElementsByTagName 无法处理带命名空间的标签，尝试 querySelector
-      const edmxQuery = xmlDoc.querySelector("Edmx");
-      if(!edmxQuery) throw new Error("无效的 OData Metadata: 未找到 <edmx:Edmx> 根节点");
+      throw new Error("无效的 OData Metadata: 未找到 <edmx:Edmx> 根节点");
   }
   const version = edmx?.getAttribute("Version") || "Unknown";
 
@@ -97,11 +95,21 @@ export const parseODataMetadata = (xmlContent: string): ODataSchema => {
 
 /**
  * 判断当前页面/内容是否是 OData 服务
+ * @param force 如果为 true (白名单)，则只要有一点像就认为是
  */
-export const isODataPage = (doc: Document, url: string): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
-    const contentType = doc.contentType;
+export const isODataPage = (doc: Document, url: string, force: boolean = false): { isOData: boolean; type: 'metadata' | 'serviceDoc' | 'data' | 'unknown' } => {
     
-    // 1. 如果是 XML 文档 (application/xml, text/xml)
+    // 0. 强制模式：如果是 XML 或 JSON 且在白名单，直接通过
+    const contentType = doc.contentType;
+    if (force) {
+        if (contentType.includes('xml') || contentType.includes('json') || url.includes('$metadata')) {
+             // 简单的类型推断
+             if (url.includes('$metadata')) return { isOData: true, type: 'metadata' };
+             return { isOData: true, type: 'unknown' };
+        }
+    }
+
+    // 1. 如果是 XML 文档
     if (contentType.includes('xml')) {
         const rootNodeName = doc.documentElement.nodeName;
         
@@ -110,52 +118,44 @@ export const isODataPage = (doc: Document, url: string): { isOData: boolean; typ
             return { isOData: true, type: 'metadata' };
         }
         
-        // Service Document (AtomPub, e.g. Northwind.svc/)
-        // root node usually <service> with xmlns="http://www.w3.org/2007/app"
+        // Service Document
         if (rootNodeName === 'service' || rootNodeName.endsWith(':service')) {
             return { isOData: true, type: 'serviceDoc' };
         }
 
-        // Atom Feed (OData v2/v3 data)
+        // Atom Feed
         if (rootNodeName === 'feed' || rootNodeName.endsWith(':feed')) {
-             // 检查是否有 m:properties 等 OData 特征
              if (doc.documentElement.innerHTML.includes('schemas.microsoft.com/ado')) {
                  return { isOData: true, type: 'data' };
              }
         }
     }
 
-    // 2. 如果是 JSON 文档 (或纯文本显示的 JSON)
-    // Chrome 有时会把 application/json 显示为纯文本
+    // 2. 如果是 JSON 文档
     const bodyText = doc.body ? doc.body.innerText : '';
-    if (bodyText.startsWith('{') && bodyText.includes('@odata.context')) {
-        return { isOData: true, type: bodyText.includes('$metadata') ? 'metadata' : 'data' };
-    }
-    
-    // V2 JSON
-    if (bodyText.includes('__metadata') && bodyText.includes('"uri":')) {
-        return { isOData: true, type: 'data' };
+    if (bodyText.trim().startsWith('{')) {
+        if (bodyText.includes('@odata.context')) {
+             return { isOData: true, type: bodyText.includes('$metadata') ? 'metadata' : 'data' };
+        }
+        // V2 JSON
+        if (bodyText.includes('__metadata') && bodyText.includes('"uri":')) {
+            return { isOData: true, type: 'data' };
+        }
     }
 
-    // 3. URL 辅助判断
-    if (url.includes('$metadata')) return { isOData: true, type: 'metadata' };
+    // 3. URL 辅助判断 (必须配合内容验证，除非是 force 模式)
+    if (url.includes('$metadata') && (contentType.includes('xml') || bodyText.includes('xml'))) {
+        return { isOData: true, type: 'metadata' };
+    }
 
     return { isOData: false, type: 'unknown' };
 };
 
-/**
- * 尝试从当前 URL 推断 Metadata URL
- */
 export const inferMetadataUrl = (url: string): string => {
     if (url.includes('$metadata')) return url;
-    
     let cleanUrl = url.split('?')[0].replace(/\/$/, '');
-    
-    // 针对 .svc 服务的处理 (WCF Data Services)
     if (cleanUrl.endsWith('.svc')) {
         return `${cleanUrl}/$metadata`;
     }
-    
-    // 默认尝试追加 $metadata
     return `${cleanUrl}/$metadata`;
 };
