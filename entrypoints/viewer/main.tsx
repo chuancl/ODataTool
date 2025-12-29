@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { browser } from 'wxt/browser';
-import { Box, Layers, ArrowRight, RefreshCw, Code, Database, AlertCircle, LayoutGrid, List } from 'lucide-react';
+import { Layers, ArrowRight, RefreshCw, Code, Database, AlertCircle, List, Wand2 } from 'lucide-react';
 import { ViewerState } from '../../types';
 import { parseODataMetadata, inferMetadataUrl } from '../../services/odataService';
-import ERDiagram from '../../components/ERDiagram';
+import QueryBuilder from '../../components/QueryBuilder';
 import '../../assets/main.css';
-
-// *** 关键修复：直接从 npm 包引入样式，确保在 Extension 环境中生效 ***
-import '@xyflow/react/dist/style.css'; 
 
 const ODataViewerApp: React.FC = () => {
   const [state, setState] = useState<ViewerState>({
@@ -16,7 +13,7 @@ const ODataViewerApp: React.FC = () => {
     isLoading: true
   });
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'details' | 'er'>('details'); // 默认视图
+  const [viewMode, setViewMode] = useState<'details' | 'query'>('details'); // 新增视图模式
 
   useEffect(() => {
     init();
@@ -27,7 +24,6 @@ const ODataViewerApp: React.FC = () => {
     const sourceType = params.get('sourceType') as any || 'url';
     let url = params.get('url') || '';
     
-    // 稍微延迟 loading 状态，避免闪烁
     setState(prev => ({ ...prev, sourceType, url, isLoading: true }));
 
     try {
@@ -40,11 +36,9 @@ const ODataViewerApp: React.FC = () => {
       } else if (sourceType === 'url' && url) {
         let fetchUrl = url;
         
-        // 尝试智能推断 $metadata
         if (!url.toLowerCase().includes('$metadata')) {
              const metadataUrl = inferMetadataUrl(url);
              try {
-                 // 快速预检
                  const res = await fetch(metadataUrl);
                  if (res.ok) {
                      const text = await res.text();
@@ -78,8 +72,9 @@ const ODataViewerApp: React.FC = () => {
   const parseAndSet = (content: string) => {
       try {
         const schema = parseODataMetadata(content);
-        // 如果解析成功，默认切换到 ER 图视图，展示成果
-        setViewMode('er'); 
+        if (schema.entities.length > 0) {
+            setSelectedEntity(schema.entities[0].name);
+        }
         setState(prev => ({ ...prev, isLoading: false, schema, content, error: undefined }));
       } catch (e: any) {
           setState(prev => ({ ...prev, isLoading: false, error: `解析失败: ${e.message}。` }));
@@ -104,22 +99,22 @@ const ODataViewerApp: React.FC = () => {
             </div>
         </div>
 
-        {/* 视图切换 Tabs */}
+        {/* View Switcher */}
         {!state.isLoading && !state.error && (
-            <div className="bg-slate-100 p-0.5 rounded-md flex items-center border border-slate-200">
+            <div className="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200">
                 <button 
                     onClick={() => setViewMode('details')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-xs font-medium transition ${viewMode === 'details' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition ${viewMode === 'details' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     <List className="w-3.5 h-3.5" />
-                    List
+                    Schema
                 </button>
                 <button 
-                    onClick={() => setViewMode('er')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-xs font-medium transition ${viewMode === 'er' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    onClick={() => setViewMode('query')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition ${viewMode === 'query' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                    <LayoutGrid className="w-3.5 h-3.5" />
-                    Diagram
+                    <Wand2 className="w-3.5 h-3.5" />
+                    Query Builder
                 </button>
             </div>
         )}
@@ -161,10 +156,10 @@ const ODataViewerApp: React.FC = () => {
         {!state.isLoading && !state.error && state.schema && (
             <>
                 {viewMode === 'details' ? (
-                    <div className="flex w-full h-full overflow-hidden">
+                     <div className="flex w-full h-full overflow-hidden">
                         {/* 左侧列表 */}
                         <div className="w-64 bg-white border-r border-slate-200 overflow-y-auto flex flex-col z-0 flex-shrink-0">
-                             <div className="p-3 border-b border-slate-100 bg-slate-50/80 sticky top-0 backdrop-blur-sm z-10">
+                                <div className="p-3 border-b border-slate-100 bg-slate-50/80 sticky top-0 backdrop-blur-sm z-10">
                                 <h2 className="font-bold text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
                                     <span>Entities</span>
                                     <span className="bg-slate-200 text-slate-600 px-1.5 rounded-full">{state.schema.entities.length}</span>
@@ -197,13 +192,13 @@ const ODataViewerApp: React.FC = () => {
                                             <h2 className="text-2xl font-bold text-slate-800">{currentEntity.name}</h2>
                                             <p className="text-slate-400 text-xs mt-1 font-mono">{state.schema.namespace}.{currentEntity.name}</p>
                                         </div>
-                                         <div className="flex flex-wrap gap-2">
+                                            <div className="flex flex-wrap gap-2">
                                             {currentEntity.keys.map(k => (
                                                 <span key={k} className="bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded border border-amber-100 font-mono flex items-center gap-1">
                                                     Key: {k}
                                                 </span>
                                             ))}
-                                         </div>
+                                            </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -258,9 +253,9 @@ const ODataViewerApp: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    // ER Diagram 视图
-                    <div className="w-full h-full bg-slate-50 relative overflow-hidden">
-                        <ERDiagram schema={state.schema} />
+                    // Query Builder View
+                    <div className="w-full h-full relative overflow-hidden">
+                        <QueryBuilder schema={state.schema} metadataUrl={state.url || ''} />
                     </div>
                 )}
             </>
