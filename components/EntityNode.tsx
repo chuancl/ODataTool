@@ -1,5 +1,5 @@
 import React from 'react';
-import { Key, Table2, Braces, Hash, Type } from 'lucide-react';
+import { Key, Table2, Braces, Hash } from 'lucide-react';
 import { ODataEntity } from '../types';
 
 interface EntityNodeProps {
@@ -102,12 +102,14 @@ const EntityNode: React.FC<EntityNodeProps> = ({ node, entity: propEntity }) => 
                 <div className="max-h-[120px] overflow-y-auto custom-scrollbar">
                     {entity.navigationProperties.map((nav) => {
                         const isCollection = nav.type.includes('Collection(');
+                        // 生成唯一 ID，确保连线能找到这一行
+                        const rowId = `nav-${entity.name}-${nav.name}`;
                         
                         return (
                         <div 
                             key={nav.name} 
                             magnet="true"
-                            id={`nav-${nav.name}`}
+                            id={rowId}
                             className="group/nav relative flex items-center justify-between px-3 py-1.5 hover:bg-indigo-50 cursor-pointer transition-colors border-l-[3px] border-transparent hover:border-indigo-400"
                         >
                             <div className="flex items-center gap-2 truncate">

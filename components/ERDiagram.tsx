@@ -10,22 +10,18 @@ import EntityNode from './EntityNode';
 // 注册自定义 React 节点
 register({
   shape: 'entity-node',
-  width: 280, // 加宽节点
-  height: 200, // 初始高度，仅占位
+  width: 280, 
+  height: 200, 
   effect: ['data'],
   component: EntityNode,
 });
 
-// 自定义连线连接器 - 使用 Jumpover (跳线) 风格，减少交叉混乱
+// 自定义连线连接器 - 跳线风格
 Graph.registerConnector(
   'jumpover',
   (sourcePoint, targetPoint, routePoints, options) => {
     const path = new Path();
     path.appendSegment(Path.createSegment('M', sourcePoint));
-    // 简单的跳线逻辑通常由 X6 内置的 jumpover 算法处理，
-    // 这里我们实际上会直接调用内置的 connector: 'jumpover'，
-    // 下面的自定义仅作为 fallback 或特殊需求保留。
-    // 为了美观，我们主要依赖配置中的 name: 'jumpover'
     
     if (routePoints && routePoints.length) {
        routePoints.forEach(p => path.appendSegment(Path.createSegment('L', p)));
@@ -40,7 +36,7 @@ interface ERDiagramProps {
   schema: ODataSchema;
 }
 
-// 估算节点高度，用于布局计算
+// 估算节点高度
 const estimateHeight = (entity: ODataEntity) => {
     const HEADER_HEIGHT = 44;
     const ROW_HEIGHT = 28;
@@ -52,7 +48,6 @@ const estimateHeight = (entity: ODataEntity) => {
     const propCount = entity.properties.filter(p => !entity.keys.includes(p.name)).length;
     const navCount = entity.navigationProperties.length;
 
-    // 限制显示的属性数量 (与组件内保持一致)
     const visibleProps = Math.min(propCount, 8); 
     const hiddenMsgHeight = propCount > 8 ? 26 : 0;
 
@@ -95,28 +90,27 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
         enabled: true,
       },
       background: {
-        color: '#f8fafc', // slate-50
+        color: '#f8fafc',
       },
       grid: {
         visible: true,
-        type: 'dot', // 改为点状网格，更干净
+        type: 'dot',
         args: [
           { color: '#cbd5e1', thickness: 1 }, 
         ],
       },
       connecting: {
         router: {
-            name: 'manhattan', // 曼哈顿路由（直角折线）
+            name: 'manhattan', // 曼哈顿直角路由
             args: {
-                padding: 20, // 避让距离
-                step: 10,
+                padding: 15, // 路由避让距离
+                step: 5,
             }
         },
         connector: {
-          name: 'jumpover', // 关键：跳线风格
+          name: 'jumpover', // 跳线
           args: {
             radius: 4,
-            size: 4, // 跳跃弧度大小
           },
         },
         anchor: 'center',
@@ -126,7 +120,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
       },
       interaction: {
         nodeMovable: true,
-        edgeMovable: false, // 禁止拖动连线
+        edgeMovable: false,
       }
     });
 
@@ -159,7 +153,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
         nodes.push({
             id: entity.name,
             shape: 'entity-node',
-            width: 280, // 宽度稍微增加
+            width: 280,
             height: estimateHeight(entity),
             data: { entity },
         });
@@ -181,23 +175,25 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
             }
 
             if (targetId && entityMap.has(targetId)) {
-                // 连线颜色：更低调的灰色，避免抢眼
-                const edgeColor = isCollection ? '#94a3b8' : '#94a3b8'; 
+                const edgeColor = '#94a3b8'; // Slate-400
                 
+                // 确保 ID 唯一
+                const sourceSelector = `[id="nav-${entity.name}-${nav.name}"]`;
+
                 edges.push({
                     id: `${entity.name}-${nav.name}-${targetId}`,
                     source: { 
                         cell: entity.name, 
-                        selector: `[id="nav-${nav.name}"]`, // 尝试连接到具体的导航行
+                        selector: sourceSelector, // 连接到具体的行
                         anchor: {
-                            name: 'right', // 强制从右侧出线，配合 Manhatten 路由
+                            name: 'right', // 尝试从右侧出线
                             args: { dy: 0 }
                         },
                         connectionPoint: 'anchor',
                     },
                     target: {
                         cell: targetId,
-                        anchor: 'left', // 强制从左侧入线
+                        anchor: 'left', // 尝试从左侧入线
                         connectionPoint: 'boundary',
                     },
                     zIndex: 0,
@@ -206,7 +202,7 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
                             stroke: edgeColor,
                             strokeWidth: 1.5,
                             targetMarker: {
-                                name: isCollection ? 'crow' : 'block', // 1:N 用鸦脚，1:1 用箭头
+                                name: isCollection ? 'crow' : 'block',
                                 width: 6,
                                 height: 6,
                                 offset: 0,
@@ -214,54 +210,20 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
                             },
                         },
                     },
-                    // 仅在 hover 时显示标签，减少视觉噪音
-                    defaultLabel: {
-                        markup: [
-                            {
-                                tagName: 'rect',
-                                selector: 'body',
-                            },
-                            {
-                                tagName: 'text',
-                                selector: 'label',
-                            },
-                        ],
-                        attrs: {
-                            label: {
-                                fill: '#64748b',
-                                fontSize: 10,
-                                textAnchor: 'middle',
-                                textVerticalAnchor: 'middle',
-                                pointerEvents: 'none',
-                            },
-                            body: {
-                                ref: 'label',
-                                fill: '#f1f5f9',
-                                stroke: '#cbd5e1',
-                                strokeWidth: 1,
-                                rx: 4,
-                                ry: 4,
-                                refWidth: '120%',
-                                refHeight: '120%',
-                                refX: '-10%',
-                                refY: '-10%',
-                            },
-                        },
-                    },
+                    // Label 配置...
                 });
             }
         });
     });
 
-    // 3. 计算布局 (Dagre) - 关键修改
+    // 3. 计算布局 (Dagre)
     const dagreLayout = new DagreLayout({
         type: 'dagre',
-        rankdir: 'TB', // 改为 Top-to-Bottom，这样孤立节点会横向铺开
+        rankdir: 'TB', // Top to Bottom
         align: 'UL',
-        ranksep: 80,   // 增加层级间距
-        nodesep: 100,  // 增加同层节点间距 (防止挤在一起)
+        ranksep: 60,   
+        nodesep: 60,
         controlPoints: true,
-        ranker: 'tight-tree', // 尝试更紧凑的树形算法
     });
 
     const model = dagreLayout.layout({
@@ -284,14 +246,14 @@ const ERDiagram: React.FC<ERDiagramProps> = ({ schema }) => {
     // 5. 自动适配
     setTimeout(() => {
         graph.centerContent();
-        graph.zoomToFit({ padding: 60, maxScale: 1.2 }); // 稍微留白多一点
+        graph.zoomToFit({ padding: 40, maxScale: 1.2 });
     }, 100);
 
-    // 6. 事件监听：高亮相关连线
+    // 6. 事件监听：高亮
     graph.on('node:mouseenter', ({ node }) => {
         const connectedEdges = graph.getConnectedEdges(node);
         connectedEdges.forEach(edge => {
-            edge.attr('line/stroke', '#6366f1'); // Indigo-500
+            edge.attr('line/stroke', '#6366f1');
             edge.attr('line/strokeWidth', 2);
             edge.toFront();
         });
